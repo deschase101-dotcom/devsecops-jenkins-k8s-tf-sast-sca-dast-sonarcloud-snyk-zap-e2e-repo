@@ -40,8 +40,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(ROOT, "site", "data")
 CACHE_DIR = os.path.join(ROOT, ".cache")
 
-BASE_URL = "https://www.football-data.co.uk/mmz4281/{season}/{code}.csv"
-FIXTURES_URL = "https://www.football-data.co.uk/fixtures.csv"
+BASE_URL = "https://football-data.co.uk/mmz4281/{season}/{code}.csv"
+FIXTURES_URL = "https://football-data.co.uk/fixtures.csv"
 
 LEAGUES = {
     "E0": ("England", "Premier League"),
@@ -334,6 +334,10 @@ TIP_FLOOR = {"1": 0.55, "2": 0.50, "X": 0.34, "O2.5": 0.62, "U2.5": 0.62, "BTTS"
              "NO_BTTS": 0.62, "1X": 0.78, "X2": 0.76, "O1.5": 0.82}
 
 
+# "Safe" low-odds markets only win the tip when nothing more useful is strong enough.
+TIP_WEIGHT = {"1X": 0.55, "X2": 0.55, "O1.5": 0.55}
+
+
 def choose_tip(p: dict[str, float], odds: dict) -> dict:
     best, best_score = None, -1e9
     for mk in TIP_MARKETS:
@@ -342,6 +346,7 @@ def choose_tip(p: dict[str, float], odds: dict) -> dict:
             continue
         # prefer informative tips: reward probability above floor, penalise "safe" low-odds markets
         score = (prob - TIP_FLOOR[mk]) / (1 - TIP_FLOOR[mk])
+        score *= TIP_WEIGHT.get(mk, 1.0)
         o = odds.get(ODDS_KEY.get(mk, ""), None)
         if o:
             score += max(0.0, prob * o - 1) * 2

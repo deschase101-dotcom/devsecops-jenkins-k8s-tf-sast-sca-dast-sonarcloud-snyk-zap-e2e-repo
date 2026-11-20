@@ -113,7 +113,7 @@
   // ------------------------------------------------------------------ components
   function matchCard(m) {
     const p = m.probs, tip = m.tip;
-    return `<a class="match" href="#/match/${encodeURIComponent(m.id)}">
+    return `<a class="match" href="#match-${DATA.pred.matches.indexOf(m)}">
       <div class="match-top"><span>${esc(m.country)} · ${esc(m.league_name)}</span><span>${fmtDate(m.date)}${m.time ? " · " + esc(m.time) : ""}</span></div>
       <div class="teams">
         <div class="team">${crest(m.home)}<span>${esc(m.home)}</span></div>
@@ -170,7 +170,7 @@
         <span class="chip-live">${t("live")}</span>
         <h1>${t("hero1")}<em>${t("hero2")}</em></h1>
         <p>${t("hero_p")}</p>
-        <div class="cta-row"><a class="btn primary" href="#/today">${t("cta_today")}</a><a class="btn" href="#/coupons">${t("cta_coupons")}</a></div>
+        <div class="cta-row"><a class="btn primary" href="#today">${t("cta_today")}</a><a class="btn" href="#coupons">${t("cta_coupons")}</a></div>
       </section>
       <div class="stats">
         <div class="stat"><b>${(meta.matches_analysed || 0).toLocaleString()}</b><span>${t("st_matches")}</span></div>
@@ -179,11 +179,11 @@
         <div class="stat"><b>${pct(bt?.tip_rate, 1)}</b><span>${t("st_bt")}</span></div>
       </div>
       <section>
-        <div class="section-head"><h2>${t("top_picks")}</h2><a href="#/today">${t("see_all")}</a></div>
+        <div class="section-head"><h2>${t("top_picks")}</h2><a href="#today">${t("see_all")}</a></div>
         ${top.length ? `<div class="grid">${top.map(matchCard).join("")}</div>` : `<div class="empty">${t("no_matches")}</div>`}
       </section>
       ${coupons.length ? `<section>
-        <div class="section-head"><h2>${t("coupons_today")}</h2><a href="#/coupons">${t("see_all")}</a></div>
+        <div class="section-head"><h2>${t("coupons_today")}</h2><a href="#coupons">${t("see_all")}</a></div>
         <div class="grid">${coupons.filter((c) => c.date === today).slice(0, 3).map(couponCard).join("")}</div>
       </section>` : ""}
       <section>
@@ -222,7 +222,7 @@
         <div class="section-head"><h2>${t("coupons_today")}</h2></div>
         ${coupons.length ? `<div class="grid">${coupons.map(couponCard).join("")}</div>` : `<div class="empty">${t("no_matches")}</div>`}
       </section>
-      ${past.length ? `<section><div class="section-head"><h2>${t("record")}</h2><a href="#/record">${t("see_all")}</a></div>
+      ${past.length ? `<section><div class="section-head"><h2>${t("record")}</h2><a href="#record">${t("see_all")}</a></div>
         <div class="grid">${past.map(couponCard).join("")}</div></section>` : ""}`;
   }
 
@@ -282,7 +282,7 @@
 
   function viewMatch(id) {
     const m = DATA.pred.matches.find((x) => x.id === id);
-    if (!m) return `<a class="back" href="#/today">${t("back")}</a><div class="empty" style="margin-top:16px">${t("no_matches")}</div>`;
+    if (!m) return `<a class="back" href="#today">${t("back")}</a><div class="empty" style="margin-top:16px">${t("no_matches")}</div>`;
     const p = m.probs;
     const row = (k) => `<div class="mk-row"><span>${esc(mk(k))}</span><span class="bar"><i style="width:${p[k] * 100}%"></i></span><span class="pct">${pct(p[k])}</span></div>`;
     const hs = m.stats.home || {}, as = m.stats.away || {};
@@ -291,7 +291,7 @@
     const why = lang === "fr"
       ? `Le modèle attend <strong>${m.xg[0].toFixed(2)}</strong> buts pour ${esc(m.home)} et <strong>${m.xg[1].toFixed(2)}</strong> pour ${esc(m.away)}. La probabilité de <strong>${esc(mk(tip.market))}</strong> est de <strong>${pct(tip.prob, 1)}</strong>, soit une cote juste de ${fmtOdds(tip.fair_odds)}${tip.book_odds ? ` contre ${fmtOdds(tip.book_odds)} chez les bookmakers (avantage ${(tip.edge * 100).toFixed(1)}%)` : ""}.`
       : `The model expects <strong>${m.xg[0].toFixed(2)}</strong> goals for ${esc(m.home)} and <strong>${m.xg[1].toFixed(2)}</strong> for ${esc(m.away)}. That gives <strong>${esc(mk(tip.market))}</strong> a <strong>${pct(tip.prob, 1)}</strong> chance — fair odds ${fmtOdds(tip.fair_odds)}${tip.book_odds ? ` vs ${fmtOdds(tip.book_odds)} at the bookmakers (edge ${(tip.edge * 100).toFixed(1)}%)` : ""}.`;
-    return `<a class="back" href="#/today">${t("back")}</a>
+    return `<a class="back" href="#today">${t("back")}</a>
       <div class="detail-hero">
         <div class="match-top"><span>${esc(m.country)} · ${esc(m.league_name)}</span><span>${fmtDate(m.date)}${m.time ? " · " + esc(m.time) : ""}</span></div>
         <div class="teams">
@@ -328,16 +328,17 @@
 
   // ------------------------------------------------------------------ router
   function render() {
-    const hash = location.hash.replace(/^#\/?/, "");
-    const [route, ...rest] = hash.split("/");
+    const route = location.hash.replace(/^#\/?/, "");
     const app = $("#app");
     let html, nav = route || "home";
-    switch (route) {
+    if (route.startsWith("match-")) {
+      const m = DATA.pred.matches[parseInt(route.slice(6), 10)];
+      html = viewMatch(m ? m.id : ""); nav = "today";
+    } else switch (route) {
       case "today": html = viewToday(); break;
       case "coupons": html = viewCoupons(); break;
       case "record": html = viewRecord(); break;
       case "tables": html = viewTables(); break;
-      case "match": html = viewMatch(decodeURIComponent(rest.join("/"))); nav = "today"; break;
       default: html = viewHome(); nav = "home";
     }
     app.innerHTML = html;

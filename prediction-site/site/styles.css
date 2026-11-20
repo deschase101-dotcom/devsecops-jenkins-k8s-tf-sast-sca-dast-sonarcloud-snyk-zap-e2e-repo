@@ -16,6 +16,7 @@
   --nav-h: 72px;
   color-scheme: dark;
 }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 25; background: var(--bg); }
 * { box-sizing: border-box; }
 html, body { margin: 0; }
 body {
@@ -33,7 +34,7 @@ h1, h2, h3 { font-family: Jost, sans-serif; line-height: 1.15; margin: 0; }
 
 /* top bar */
 .topbar {
-  position: sticky; top: 0; z-index: 20;
+  position: sticky; top: env(safe-area-inset-top, 0px); z-index: 20;
   display: flex; align-items: center; justify-content: space-between;
   padding: 12px 16px;
   background: rgba(11,20,36,.85); backdrop-filter: blur(12px);
