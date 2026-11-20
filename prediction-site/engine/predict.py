@@ -439,7 +439,7 @@ def predict_fixtures(results: dict[str, list[dict]], fixtures: list[dict], today
         country, name = LEAGUES.get(code, ("", code))
         out.append({
             "id": match_id(code, f["date"], f["home"], f["away"]),
-            "league": code, "country": country, "league_name": name,
+            "sport": "soccer", "league": code, "country": country, "league_name": name,
             "date": f["date"].isoformat(), "time": f.get("time", ""),
             "home": f["home"], "away": f["away"],
             "xg": [round(lh, 2), round(la, 2)],
@@ -457,7 +457,7 @@ def predict_fixtures(results: dict[str, list[dict]], fixtures: list[dict], today
     return out
 
 
-def build_coupons(preds: list[dict], today: dt.date) -> list[dict]:
+def build_coupons(preds: list[dict], today: dt.date, sport: str = "soccer") -> list[dict]:
     coupons = []
     for day_offset in range(2):
         day = (today + dt.timedelta(days=day_offset)).isoformat()
@@ -469,14 +469,15 @@ def build_coupons(preds: list[dict], today: dt.date) -> list[dict]:
             t = m["tip"]
             return {"id": m["id"], "league": m["league"], "league_name": m["league_name"], "country": m["country"],
                     "date": m["date"], "time": m["time"], "home": m["home"], "away": m["away"],
-                    "market": t["market"], "prob": t["prob"], "odds": t["book_odds"] or t["fair_odds"]}
+                    "sport": sport, "market": t["market"], "line": t.get("line"), "prob": t["prob"],
+                    "odds": t["book_odds"] or t["fair_odds"]}
 
         def mk(kind: str, picks: list[dict]) -> dict | None:
             if len(picks) < 2:
                 return None
             prob = math.prod(p["prob"] for p in picks)
             odds = math.prod(p["odds"] for p in picks)
-            return {"id": f"{day}|{kind}", "date": day, "kind": kind, "picks": picks,
+            return {"id": f"{day}|{sport}|{kind}", "sport": sport, "date": day, "kind": kind, "picks": picks,
                     "total_odds": round(odds, 2), "prob": round(prob, 4)}
 
         safe = sorted((m for m in todays if m["tip"]["prob"] >= 0.70), key=lambda m: -m["tip"]["prob"])[:3]
@@ -489,8 +490,12 @@ def build_coupons(preds: list[dict], today: dt.date) -> list[dict]:
     return coupons
 
 
-def tip_won(market: str, hg: int, ag: int) -> bool:
+def tip_won(market: str, hg: int, ag: int, line: float | None = None) -> bool:
     t = hg + ag
+    if market in ("ML_H", "ML_A", "SP_H", "SP_A", "OV", "UN"):
+        return {"ML_H": hg > ag, "ML_A": ag > hg,
+                "SP_H": line is not None and hg + line > ag, "SP_A": line is not None and ag + line > hg,
+                "OV": line is not None and t > line, "UN": line is not None and t < line}[market]
     return {
         "1": hg > ag, "X": hg == ag, "2": hg < ag,
         "1X": hg >= ag, "X2": hg <= ag, "12": hg != ag,
@@ -500,13 +505,19 @@ def tip_won(market: str, hg: int, ag: int) -> bool:
     }[market]
 
 
-def settle_history(history: dict, results: dict[str, list[dict]], preds: list[dict], coupons: list[dict]) -> dict:
+def soccer_finished(results: dict[str, list[dict]]) -> dict:
+    return {match_id(code, m["date"], m["home"], m["away"]): (m["hg"], m["ag"])
+            for code, ms in results.items() for m in ms}
+
+
+def settle_history(history: dict, finished: dict, preds: list[dict], coupons: list[dict]) -> dict:
     """history = {"tips": {id: {...}}, "coupons": {id: {...}}} — append new, settle finished."""
     tips, cps = history.setdefault("tips", {}), history.setdefault("coupons", {})
     for m in preds:
         if m["id"] not in tips or tips[m["id"]]["status"] == "pending":
             t = m["tip"]
-            tips[m["id"]] = {"id": m["id"], "league": m["league"], "league_name": m["league_name"],
+            tips[m["id"]] = {"id": m["id"], "sport": m.get("sport", "soccer"), "line": t.get("line"),
+                             "league": m["league"], "league_name": m["league_name"],
                              "date": m["date"], "home": m["home"], "away": m["away"],
                              "market": t["market"], "prob": t["prob"], "odds": t["book_odds"] or t["fair_odds"],
                              "status": "pending", "score": None}
@@ -514,15 +525,11 @@ def settle_history(history: dict, results: dict[str, list[dict]], preds: list[di
         if c["id"] not in cps or cps[c["id"]]["status"] == "pending":
             cps[c["id"]] = {**c, "status": "pending"}
 
-    finished = {}
-    for code, ms in results.items():
-        for m in ms:
-            finished[match_id(code, m["date"], m["home"], m["away"])] = (m["hg"], m["ag"])
     for t in tips.values():
         if t["status"] == "pending" and t["id"] in finished:
             hg, ag = finished[t["id"]]
             t["score"] = f"{hg}-{ag}"
-            t["status"] = "won" if tip_won(t["market"], hg, ag) else "lost"
+            t["status"] = "won" if tip_won(t["market"], hg, ag, t.get("line")) else "lost"
     for c in cps.values():
         if c["status"] != "pending":
             continue
@@ -551,7 +558,10 @@ def summarize_history(history: dict, today: dt.date) -> dict:
         by_market[t["market"]].append(t)
     last30 = [t for t in tips if (today - dt.date.fromisoformat(t["date"])).days <= 30]
     cps = [c for c in history.get("coupons", {}).values() if c["status"] != "pending"]
-    return {"overall": agg(tips), "last30": agg(last30),
+    by_sport = defaultdict(list)
+    for t in tips:
+        by_sport[t.get("sport", "soccer")].append(t)
+    return {"overall": agg(tips), "last30": agg(last30), "by_sport": {k: agg(v) for k, v in by_sport.items()},
             "by_market": {k: agg(v) for k, v in sorted(by_market.items())},
             "coupons": {"n": len(cps), "won": sum(c["status"] == "won" for c in cps)}}
 
@@ -618,8 +628,26 @@ def main() -> None:
         sys.exit("No data downloaded — aborting so the previous site data is kept.")
 
     preds = predict_fixtures(results, fixtures, today)
-    coupons = build_coupons(preds, today)
-    print(f"  {len(preds)} predictions, {len(coupons)} coupons")
+    coupons = build_coupons(preds, today, "soccer")
+    print(f"  soccer: {len(preds)} predictions, {len(coupons)} coupons")
+    finished = soccer_finished(results)
+    sport_counts = {"soccer": n_res}
+    extra_recent, sport_bt = [], {}
+    if not args.demo:
+        import other_sports as osp
+        jobs = [("basketball", lambda: osp.run_team_sport("nba", today, CACHE_DIR)),
+                ("hockey", lambda: osp.run_team_sport("nhl", today, CACHE_DIR)),
+                ("tennis", lambda: osp.run_tennis(today, CACHE_DIR))]
+        for sport, job in jobs:
+            try:
+                sp_preds, sp_fin, sp_recent, sp_n, sp_bt = job()
+            except Exception as e:  # noqa: BLE001  one sport failing must not kill the others
+                print(f"  ! {sport} failed: {e}", file=sys.stderr)
+                continue
+            sp_coupons = build_coupons(sp_preds, today, sport)
+            print(f"  {sport}: {sp_n} results, {len(sp_preds)} predictions, {len(sp_coupons)} coupons, backtest {sp_bt}")
+            preds += sp_preds; coupons += sp_coupons; finished.update(sp_fin)
+            extra_recent += sp_recent; sport_counts[sport] = sp_n; sport_bt[sport] = sp_bt
 
     hist_path = os.path.join(DATA_DIR, "history.json")
     history = {}
@@ -635,8 +663,8 @@ def main() -> None:
             past_fx = [{k: v for k, v in m.items() if k not in ("hg", "ag")}
                        for ms in results.values() for m in ms if m["date"] == d]
             past_preds = predict_fixtures(results, past_fx, d)
-            history = settle_history(history, results, past_preds, build_coupons(past_preds, d))
-    history = settle_history(history, results, preds, coupons)
+            history = settle_history(history, soccer_finished(results), past_preds, build_coupons(past_preds, d))
+    history = settle_history(history, finished, preds, coupons)
     history["demo"] = args.demo
 
     season_start = dt.date(today.year if today.month >= 7 else today.year - 1, 7, 1)
@@ -646,13 +674,15 @@ def main() -> None:
     for code, ms in results.items():
         for m in ms:
             if (today - m["date"]).days <= 7:
-                recent.append({"league": code, "league_name": LEAGUES.get(code, ("", code))[1],
+                recent.append({"league": code, "sport": "soccer", "league_name": LEAGUES.get(code, ("", code))[1],
                                "date": m["date"].isoformat(), "home": m["home"], "away": m["away"],
                                "score": f'{m["hg"]}-{m["ag"]}'})
+    recent += extra_recent
     recent.sort(key=lambda r: r["date"], reverse=True)
 
     meta = {"generated_at": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
-            "date": today.isoformat(), "demo": args.demo, "matches_analysed": n_res,
+            "date": today.isoformat(), "demo": args.demo, "matches_analysed": sum(sport_counts.values()),
+            "sports": sport_counts,
             "leagues": {c: {"country": LEAGUES[c][0], "name": LEAGUES[c][1]} for c in results if c in LEAGUES},
             "record": summarize_history(history, today)}
 
@@ -663,11 +693,12 @@ def main() -> None:
     dump("predictions.json", {"meta": meta, "matches": preds, "coupons": coupons})
     dump("history.json", history)
     dump("tables.json", tables)
-    dump("results.json", recent[:120])
+    dump("results.json", recent[:200])
 
     if not args.no_backtest:
         print("  running walk-forward backtest…")
         bt = backtest(results, today)
+        bt["sports"] = sport_bt
         dump("backtest.json", bt)
         print(f"  backtest: {bt['matches']} matches, 1X2 accuracy {bt['acc_1x2']:.1%}, tip hit-rate {bt['tip_rate']:.1%}")
     print("done.")

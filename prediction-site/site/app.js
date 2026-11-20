@@ -8,7 +8,7 @@
       nav_home: "Home", nav_today: "Matches", nav_coupons: "Coupons", nav_record: "Record", nav_tables: "Tables",
       live: "LIVE DATA & ALGORITHMS",
       hero1: "Stop guessing,", hero2: "bet with data.",
-      hero_p: "Every day our model re-reads every recorded result, rates each team's attack and defence, and turns it into probabilities for today's matches.",
+      hero_p: "Every day our model re-reads every recorded result, rates every team and player, and turns it into probabilities for today's football, NBA, NHL and tennis games.",
       cta_today: "Today's predictions", cta_coupons: "Daily coupons",
       st_matches: "results analysed", st_hit: "tip hit-rate (settled)", st_today: "matches predicted", st_bt: "backtest tip hit-rate",
       top_picks: "Top picks today", see_all: "See all →", coupons_today: "Today's coupons",
@@ -41,12 +41,18 @@
       "m_O1.5": "Over 1.5 goals", "m_O2.5": "Over 2.5 goals", "m_O3.5": "Over 3.5 goals",
       "m_U1.5": "Under 1.5 goals", "m_U2.5": "Under 2.5 goals", "m_U3.5": "Under 3.5 goals",
       m_BTTS: "Both teams score", m_NO_BTTS: "Not both score", m_H_SCORES: "Home scores", m_A_SCORES: "Away scores",
+      m_ML_H: "Home win", m_ML_A: "Away win", m_SP_H: "Home spread", m_SP_A: "Away spread", m_OV: "Over", m_UN: "Under",
+      s_all: "All sports", s_soccer: "Football", s_basketball: "Basketball", s_hockey: "Ice hockey", s_tennis: "Tennis",
+      win: "to win", over: "Over", under: "Under", proj: "Projected", elo: "Elo rating", points: "pts", goals: "goals",
+      pf: "Scored / game", pa: "Conceded / game", winr: "Win rate", overr: "Over the line", played: "Matches rated",
+      model: "Model", market_p: "Market", book: "Odds", by_sport: "By sport", sport: "Sport",
+      no_sport: "No games to analyse for this sport today or tomorrow.",
     },
     fr: {
       nav_home: "Accueil", nav_today: "Matchs", nav_coupons: "Coupons", nav_record: "Bilan", nav_tables: "Classements",
       live: "DONNÉES & ALGORITHMES",
       hero1: "Arrêtez de deviner,", hero2: "pariez avec les données.",
-      hero_p: "Chaque jour notre modèle relit tous les résultats enregistrés, note l'attaque et la défense de chaque équipe et en tire des probabilités pour les matchs du jour.",
+      hero_p: "Chaque jour notre modèle relit tous les résultats enregistrés, note chaque équipe et chaque joueur, et en tire des probabilités pour le football, la NBA, la NHL et le tennis du jour.",
       cta_today: "Pronostics du jour", cta_coupons: "Coupons du jour",
       st_matches: "résultats analysés", st_hit: "réussite des pronos", st_today: "matchs analysés", st_bt: "réussite en backtest",
       top_picks: "Meilleurs pronos du jour", see_all: "Tout voir →", coupons_today: "Coupons du jour",
@@ -79,12 +85,34 @@
       "m_O1.5": "Plus de 1,5 buts", "m_O2.5": "Plus de 2,5 buts", "m_O3.5": "Plus de 3,5 buts",
       "m_U1.5": "Moins de 1,5 buts", "m_U2.5": "Moins de 2,5 buts", "m_U3.5": "Moins de 3,5 buts",
       m_BTTS: "Les deux marquent", m_NO_BTTS: "Pas les deux", m_H_SCORES: "Domicile marque", m_A_SCORES: "Extérieur marque",
+      m_ML_H: "Victoire domicile", m_ML_A: "Victoire extérieur", m_SP_H: "Handicap domicile", m_SP_A: "Handicap extérieur", m_OV: "Plus de", m_UN: "Moins de",
+      s_all: "Tous les sports", s_soccer: "Football", s_basketball: "Basket", s_hockey: "Hockey sur glace", s_tennis: "Tennis",
+      win: "gagne", over: "Plus de", under: "Moins de", proj: "Projection", elo: "Classement Elo", points: "pts", goals: "buts",
+      pf: "Marqués / match", pa: "Encaissés / match", winr: "Victoires", overr: "Au-dessus de la ligne", played: "Matchs notés",
+      model: "Modèle", market_p: "Marché", book: "Cote", by_sport: "Par sport", sport: "Sport",
+      no_sport: "Aucun match à analyser pour ce sport aujourd'hui ou demain.",
     },
   };
   let lang = (() => { try { return localStorage.getItem("ps_lang") || (navigator.language || "en").slice(0, 2); } catch { return "en"; } })();
   if (!I18N[lang]) lang = "en";
   const t = (k) => (I18N[lang][k] ?? I18N.en[k] ?? k);
   const mk = (m) => t("m_" + m);
+  const signed = (x) => (x > 0 ? "+" : "") + x;
+  // full label for a market on a specific game, e.g. "Lakers -5.5", "Over 219.5", "Sinner to win"
+  function mkLabel(code, line, home, away) {
+    switch (code) {
+      case "ML_H": return `${home} ${t("win")}`;
+      case "ML_A": return `${away} ${t("win")}`;
+      case "SP_H": return `${home} ${signed(line)}`;
+      case "SP_A": return `${away} ${signed(line)}`;
+      case "OV": return `${t("over")} ${line}`;
+      case "UN": return `${t("under")} ${line}`;
+      default: return mk(code);
+    }
+  }
+  const SPORTS = ["soccer", "basketball", "hockey", "tennis"];
+  const SPORT_ICON = { soccer: "⚽", basketball: "🏀", hockey: "🏒", tennis: "🎾" };
+  const sportOf = (m) => m.sport || "soccer";
 
   // ------------------------------------------------------------------ utils
   const $ = (s, r = document) => r.querySelector(s);
@@ -112,6 +140,7 @@
 
   // ------------------------------------------------------------------ components
   function matchCard(m) {
+    if (sportOf(m) !== "soccer") return otherCard(m);
     const p = m.probs, tip = m.tip;
     return `<a class="match" href="#match-${DATA.pred.matches.indexOf(m)}">
       <div class="match-top"><span>${esc(m.country)} · ${esc(m.league_name)}</span><span>${fmtDate(m.date)}${m.time ? " · " + esc(m.time) : ""}</span></div>
@@ -133,18 +162,58 @@
     </a>`;
   }
 
+  function twoWay(m) {
+    const ph = (m.markets.find((x) => x.code === "ML_H") || {}).prob || 0.5;
+    return { ph, pa: 1 - ph };
+  }
+  function centerInfo(m) {
+    const sp = sportOf(m);
+    if (sp === "tennis") return `${t("elo")}<b>${m.elo[0]} – ${m.elo[1]}</b>`;
+    const d = sp === "basketball" ? 0 : 1;
+    return `${t("proj")}<b>${m.xg[0].toFixed(d)} – ${m.xg[1].toFixed(d)}</b>`;
+  }
+  function otherCard(m) {
+    const tip = m.tip, { ph, pa } = twoWay(m), sp = sportOf(m);
+    const sub = sp === "tennis" ? `${esc(m.league_name)}${m.round ? " · " + esc(m.round) : ""}` : `${esc(m.country)} · ${esc(m.league_name)}`;
+    return `<a class="match" href="#match-${DATA.pred.matches.indexOf(m)}">
+      <div class="match-top"><span>${SPORT_ICON[sp]} ${sub}</span><span>${fmtDate(m.date)}${m.time ? " · " + esc(m.time) : ""}</span></div>
+      <div class="teams">
+        <div class="team">${crest(m.home)}<span>${esc(m.home)}</span></div>
+        <div class="vs">${centerInfo(m)}</div>
+        <div class="team">${crest(m.away)}<span>${esc(m.away)}</span></div>
+      </div>
+      <div class="probbar"><i class="h" style="width:${ph * 100}%"></i><i class="a" style="width:${pa * 100}%"></i></div>
+      <div class="problabels"><span>${pct(ph)}${m.odds.ml_h ? " @" + fmtOdds(m.odds.ml_h) : ""}</span><span>${pct(pa)}${m.odds.ml_a ? " @" + fmtOdds(m.odds.ml_a) : ""}</span></div>
+      <div class="tip-row">
+        <span class="tip"><span class="tag">${esc(tip.market.replace("_", " "))}</span>${esc(mkLabel(tip.market, tip.line, m.home_abbr || m.home, m.away_abbr || m.away))}</span>
+        <span style="display:flex;gap:6px;align-items:center">
+          ${tip.value ? `<span class="value">${t("value")}</span>` : ""}
+          <span class="conf ${tip.confidence}">${pct(tip.prob)}</span>
+          <span class="odds">@${fmtOdds(tip.book_odds || tip.fair_odds)}</span>
+        </span>
+      </div>
+    </a>`;
+  }
+
+  function sportTabs(counts) {
+    const f = (v, label) => `<button class="filter ${state.sport === v ? "on" : ""}" data-f="sport" data-v="${v}">${label}</button>`;
+    return `<div class="filters">${f("all", t("s_all"))}${SPORTS.map((s) => f(s, `${SPORT_ICON[s]} ${t("s_" + s)}${counts && counts[s] != null ? ` · ${counts[s]}` : ""}`)).join("")}</div>`;
+  }
+  const bySport = (arr) => (state.sport === "all" ? arr : arr.filter((x) => (x.sport || "soccer") === state.sport));
+  const countBy = (arr) => SPORTS.reduce((o, s) => ((o[s] = arr.filter((x) => (x.sport || "soccer") === s).length), o), {});
+
   function couponCard(c) {
     const status = c.status || "pending";
     const legs = c.picks.map((p) => `<div class="leg">
         <div class="leg-top"><span>${esc(p.country || "")} · ${esc(p.league_name)}</span><span>${fmtDate(p.date, { day: "2-digit", month: "2-digit" })}${p.time ? " " + esc(p.time) : ""}</span></div>
         <div class="leg-teams">${esc(p.home)} <span class="sub">vs</span> ${esc(p.away)}${p.score ? ` <span class="mono">(${esc(p.score)})</span>` : ""}</div>
-        <div class="leg-bottom"><span>${esc(p.market)} · ${esc(mk(p.market))}</span><span class="mono ${p.status ? "status-" + p.status : ""}">${fmtOdds(p.odds)}</span></div>
+        <div class="leg-bottom"><span>${esc(mkLabel(p.market, p.line, p.home, p.away))}</span><span class="mono ${p.status ? "status-" + p.status : ""}">${fmtOdds(p.odds)}</span></div>
       </div>`).join("");
     const done = c.picks.filter((p) => p.status && p.status !== "pending").length;
     return `<article class="coupon">
       <div class="coupon-head">
         <span class="coupon-icon"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="7" rx="2"/><rect x="4" y="13" width="16" height="7" rx="2"/></svg></span>
-        <div><small>${fmtDate(c.date)}</small><h3>${t("coupon")}</h3><small class="mono">N° ${esc(c.id.replace(/\D/g, "").slice(0, 10))}</small></div>
+        <div><small>${fmtDate(c.date)}</small><h3>${SPORT_ICON[c.sport || "soccer"]} ${t("coupon")} · ${t("s_" + (c.sport || "soccer"))}</h3><small class="mono">N° ${esc(c.id.replace(/\D/g, "").slice(0, 10))}</small></div>
         <span class="coupon-kind kind-${c.kind}">${t("k_" + c.kind)}</span>
       </div>
       <dl class="kv">
@@ -162,8 +231,8 @@
     const { meta, matches, coupons } = DATA.pred;
     const bt = DATA.backtest;
     const today = meta.date;
-    const top = matches.filter((m) => m.date === today || m.date === addDays(today, 1))
-      .sort((a, b) => b.tip.prob - a.tip.prob).slice(0, 6);
+    const soon = matches.filter((m) => m.date === today || m.date === addDays(today, 1));
+    const top = bySport(soon).sort((a, b) => b.tip.prob - a.tip.prob).slice(0, 6);
     const rec = meta.record?.overall || {};
     return `
       <section class="hero">
@@ -180,11 +249,12 @@
       </div>
       <section>
         <div class="section-head"><h2>${t("top_picks")}</h2><a href="#today">${t("see_all")}</a></div>
+        ${sportTabs(countBy(soon))}
         ${top.length ? `<div class="grid">${top.map(matchCard).join("")}</div>` : `<div class="empty">${t("no_matches")}</div>`}
       </section>
       ${coupons.length ? `<section>
         <div class="section-head"><h2>${t("coupons_today")}</h2><a href="#coupons">${t("see_all")}</a></div>
-        <div class="grid">${coupons.filter((c) => c.date === today).slice(0, 3).map(couponCard).join("")}</div>
+        <div class="grid">${bySport(coupons).filter((c) => c.date === today || c.date === addDays(today, 1)).slice(0, 3).map(couponCard).join("")}</div>
       </section>` : ""}
       <section>
         <div class="section-head"><h2>${t("how")}</h2></div>
@@ -193,21 +263,22 @@
       <p class="sub" style="text-align:center;margin-top:24px">${t("updated")}: ${new Date(meta.generated_at).toLocaleString(lang === "fr" ? "fr-FR" : "en-GB")}</p>`;
   }
 
-  const state = { day: "today", league: "all", flag: "all" };
+  const state = { day: "today", league: "all", flag: "all", sport: "all" };
   function viewToday() {
     const { meta, matches } = DATA.pred;
     const today = meta.date;
-    let ms = matches;
+    let ms = bySport(matches);
     if (state.day === "today") ms = ms.filter((m) => m.date === today);
     else if (state.day === "tomorrow") ms = ms.filter((m) => m.date === addDays(today, 1));
     if (state.league !== "all") ms = ms.filter((m) => m.league === state.league);
     if (state.flag === "value") ms = ms.filter((m) => m.tip.value);
     if (state.flag === "high") ms = ms.filter((m) => m.tip.confidence === "high");
-    const leagues = [...new Set(matches.map((m) => m.league))];
+    const leagues = [...new Set(bySport(matches).map((m) => m.league))];
     const f = (group, val, label) => `<button class="filter ${state[group] === val ? "on" : ""}" data-f="${group}" data-v="${esc(val)}">${esc(label)}</button>`;
     return `<section>
       <div class="section-head"><h2>${t("nav_today")}</h2><span class="sub">${ms.length}</span></div>
       <div class="filters">${f("day", "today", t("today"))}${f("day", "tomorrow", t("tomorrow"))}${f("day", "week", t("week"))}</div>
+      ${sportTabs(countBy(matches))}
       <div class="filters">${f("league", "all", t("all"))}${leagues.map((l) => f("league", l, meta.leagues[l]?.name || l)).join("")}</div>
       <div class="filters">${f("flag", "all", t("all"))}${f("flag", "high", t("high_conf"))}${f("flag", "value", t("value_only"))}</div>
       ${ms.length ? `<div class="grid">${ms.map(matchCard).join("")}</div>` : `<div class="empty">${t("no_matches")}</div>`}
@@ -216,11 +287,12 @@
 
   function viewCoupons() {
     const { coupons } = DATA.pred;
-    const past = Object.values(DATA.history.coupons || {}).filter((c) => c.status !== "pending")
+    const past = bySport(Object.values(DATA.history.coupons || {})).filter((c) => c.status !== "pending")
       .sort((a, b) => b.date.localeCompare(a.date)).slice(0, 9);
     return `<section>
         <div class="section-head"><h2>${t("coupons_today")}</h2></div>
-        ${coupons.length ? `<div class="grid">${coupons.map(couponCard).join("")}</div>` : `<div class="empty">${t("no_matches")}</div>`}
+        ${sportTabs(countBy(coupons))}
+        ${bySport(coupons).length ? `<div class="grid">${bySport(coupons).map(couponCard).join("")}</div>` : `<div class="empty">${t("no_sport")}</div>`}
       </section>
       ${past.length ? `<section><div class="section-head"><h2>${t("record")}</h2><a href="#record">${t("see_all")}</a></div>
         <div class="grid">${past.map(couponCard).join("")}</div></section>` : ""}`;
@@ -243,6 +315,10 @@
         <div class="panels">${tile(t("overall"), r.overall)}${tile(t("last30"), r.last30)}</div>
         <p class="sub">${t("coupons_won")}: <b>${r.coupons?.won ?? 0}</b> / ${r.coupons?.n ?? 0}</p>
       </section>
+      ${Object.keys(r.by_sport || {}).length ? `<section><div class="section-head"><h2>${t("by_sport")}</h2></div>
+        <div class="table-wrap"><table class="std"><thead><tr><th>${t("sport")}</th><th></th><th>${t("n")}</th><th>${t("hit")}</th><th>ROI</th></tr></thead><tbody>
+        ${Object.entries(r.by_sport).map(([k, a]) => `<tr><td>${SPORT_ICON[k] || ""}</td><td>${esc(t("s_" + k))}</td><td>${a.n}</td><td>${pct(a.rate, 1)}</td><td class="${a.roi >= 0 ? "status-won" : "status-lost"}">${(a.roi * 100).toFixed(1)}%</td></tr>`).join("")}
+        </tbody></table></div></section>` : ""}
       ${markets.length ? `<section><div class="section-head"><h2>${t("by_market")}</h2></div>
         <div class="table-wrap"><table class="std"><thead><tr><th>${t("market")}</th><th></th><th>${t("n")}</th><th>${t("hit")}</th><th>ROI</th></tr></thead><tbody>
         ${markets.map(([k, a]) => `<tr><td><b>${esc(k)}</b></td><td>${esc(mk(k))}</td><td>${a.n}</td><td>${pct(a.rate, 1)}</td><td class="${a.roi >= 0 ? "status-won" : "status-lost"}">${(a.roi * 100).toFixed(1)}%</td></tr>`).join("")}
@@ -256,10 +332,11 @@
         </div>
         <div class="table-wrap" style="margin-top:12px"><table class="std"><thead><tr><th>League</th><th></th><th>${t("matches")}</th><th>${t("acc")}</th><th>${t("hit")}</th></tr></thead><tbody>
         ${Object.entries(bt.leagues).map(([k, l]) => `<tr><td><b>${esc(k)}</b></td><td>${esc(l.league_name)}</td><td>${l.matches}</td><td>${pct(l.acc_1x2, 1)}</td><td>${pct(l.tip_rate, 1)}</td></tr>`).join("")}
+        ${Object.entries(bt.sports || {}).filter(([, v]) => v.matches).map(([k, v]) => `<tr><td>${SPORT_ICON[k]}</td><td>${esc(t("s_" + k))} (${lang === "fr" ? "vainqueur" : "winner"})</td><td>${v.matches}</td><td>${pct(v.acc, 1)}</td><td>–</td></tr>`).join("")}
         </tbody></table></div></section>` : ""}
       ${settled.length ? `<section><div class="section-head"><h2>${t("recent_tips")}</h2></div>
         <div class="table-wrap"><table class="std"><thead><tr><th>${t("matches")}</th><th></th><th>${t("tip")}</th><th>Score</th><th>${t("status")}</th></tr></thead><tbody>
-        ${settled.map((x) => `<tr><td>${fmtDate(x.date, { day: "2-digit", month: "2-digit" })}</td><td>${esc(x.home)} – ${esc(x.away)}</td><td><b>${esc(x.market)}</b> @${fmtOdds(x.odds)}</td><td class="mono">${esc(x.score)}</td><td class="status-${x.status}">${t(x.status)}</td></tr>`).join("")}
+        ${settled.map((x) => `<tr><td>${fmtDate(x.date, { day: "2-digit", month: "2-digit" })}</td><td>${esc(x.home)} – ${esc(x.away)}</td><td><b>${esc(mkLabel(x.market, x.line, x.home, x.away))}</b> @${fmtOdds(x.odds)}</td><td class="mono">${esc(x.score)}</td><td class="status-${x.status}">${t(x.status)}</td></tr>`).join("")}
         </tbody></table></div></section>` : ""}`;
   }
 
@@ -283,6 +360,7 @@
   function viewMatch(id) {
     const m = DATA.pred.matches.find((x) => x.id === id);
     if (!m) return `<a class="back" href="#today">${t("back")}</a><div class="empty" style="margin-top:16px">${t("no_matches")}</div>`;
+    if (sportOf(m) !== "soccer") return viewOther(m);
     const p = m.probs;
     const row = (k) => `<div class="mk-row"><span>${esc(mk(k))}</span><span class="bar"><i style="width:${p[k] * 100}%"></i></span><span class="pct">${pct(p[k])}</span></div>`;
     const hs = m.stats.home || {}, as = m.stats.away || {};
@@ -320,6 +398,60 @@
             <tr><td>${m.strength.home_def}</td><td>${t("def")}</td><td>${m.strength.away_def}</td></tr>
           </tbody></table>
         </div>
+        <div class="panel"><h3>${t("h2h")}</h3>
+          ${m.h2h.length ? `<table class="cmp"><tbody>${m.h2h.map((g) => `<tr><td>${fmtDate(g.date, { day: "2-digit", month: "2-digit", year: "2-digit" })}</td><td>${esc(g.home)} – ${esc(g.away)}</td><td class="mono"><b>${esc(g.score)}</b></td></tr>`).join("")}</tbody></table>` : `<p class="sub">${t("no_h2h")}</p>`}
+        </div>
+      </section>`;
+  }
+
+  function viewOther(m) {
+    const sp = sportOf(m), tip = m.tip, { ph, pa } = twoWay(m);
+    const unit = sp === "basketball" ? t("points") : t("goals");
+    const lbl = (x) => mkLabel(x.code, x.line, m.home, m.away);
+    const rows = m.markets.map((x) => `<tr><td>${esc(lbl(x))}</td><td class="mono">${pct(x.model_prob, 1)}</td><td class="mono">${x.market_prob != null ? pct(x.market_prob, 1) : "–"}</td><td class="mono"><b>${pct(x.prob, 1)}</b></td><td class="mono">${x.odds ? fmtOdds(x.odds) : "–"}</td><td class="mono ${x.edge > 0 ? "status-won" : ""}">${x.edge != null ? (x.edge * 100).toFixed(1) + "%" : "–"}</td></tr>`).join("");
+    const tipTxt = esc(lbl({ code: tip.market, line: tip.line }));
+    let why;
+    if (sp === "tennis") {
+      why = lang === "fr"
+        ? `${esc(m.home)} a un Elo de <strong>${m.elo[0]}</strong> contre <strong>${m.elo[1]}</strong> pour ${esc(m.away)} (calculé sur ${m.matches_played[0]} et ${m.matches_played[1]} matchs). Probabilité pour <strong>${tipTxt}</strong> : <strong>${pct(tip.prob, 1)}</strong>, cote juste ${fmtOdds(tip.fair_odds)}.`
+        : `${esc(m.home)} is rated <strong>${m.elo[0]}</strong> Elo against <strong>${m.elo[1]}</strong> for ${esc(m.away)} (from ${m.matches_played[0]} and ${m.matches_played[1]} rated matches). That makes <strong>${tipTxt}</strong> <strong>${pct(tip.prob, 1)}</strong> likely, fair odds ${fmtOdds(tip.fair_odds)}.`;
+    } else {
+      const d = sp === "basketball" ? 1 : 2;
+      why = lang === "fr"
+        ? `Projection : <strong>${m.xg[0].toFixed(d)}</strong> ${unit} pour ${esc(m.home)} et <strong>${m.xg[1].toFixed(d)}</strong> pour ${esc(m.away)}. Probabilité pour <strong>${tipTxt}</strong> : <strong>${pct(tip.prob, 1)}</strong> (cote juste ${fmtOdds(tip.fair_odds)}${tip.book_odds ? `, bookmaker ${fmtOdds(tip.book_odds)}, avantage ${(tip.edge * 100).toFixed(1)}%` : ""}).`
+        : `Projected score: <strong>${m.xg[0].toFixed(d)}</strong> ${unit} for ${esc(m.home)}, <strong>${m.xg[1].toFixed(d)}</strong> for ${esc(m.away)}. <strong>${tipTxt}</strong> comes out at <strong>${pct(tip.prob, 1)}</strong> (fair odds ${fmtOdds(tip.fair_odds)}${tip.book_odds ? `, bookmaker ${fmtOdds(tip.book_odds)}, edge ${(tip.edge * 100).toFixed(1)}%` : ""}).`;
+    }
+    const hs = (m.stats || {}).home || {}, as = (m.stats || {}).away || {};
+    const cmp = (label, key, f = (x) => x) => `<tr><td>${hs[key] != null ? f(hs[key]) : "–"}</td><td>${label}</td><td>${as[key] != null ? f(as[key]) : "–"}</td></tr>`;
+    return `<a class="back" href="#today">${t("back")}</a>
+      <div class="detail-hero">
+        <div class="match-top"><span>${SPORT_ICON[sp]} ${esc(m.league_name)}${m.round ? " · " + esc(m.round) : ""}</span><span>${fmtDate(m.date)}${m.time ? " · " + esc(m.time) : ""}</span></div>
+        <div class="teams">
+          <div class="team">${crest(m.home)}<span>${esc(m.home)}</span>${formChips(m.form.home)}</div>
+          <div class="vs">${centerInfo(m)}</div>
+          <div class="team">${crest(m.away)}<span>${esc(m.away)}</span>${formChips(m.form.away)}</div>
+        </div>
+        <div class="probbar"><i class="h" style="width:${ph * 100}%"></i><i class="a" style="width:${pa * 100}%"></i></div>
+        <div class="problabels"><span>${pct(ph, 1)}${m.odds.ml_h ? " @" + fmtOdds(m.odds.ml_h) : ""}</span><span>${pct(pa, 1)}${m.odds.ml_a ? " @" + fmtOdds(m.odds.ml_a) : ""}</span></div>
+        <div class="tip-row">
+          <span class="tip">${t("tip")}: <span class="tag">${esc(tip.market.replace("_", " "))}</span>${tipTxt}</span>
+          <span style="display:flex;gap:6px;align-items:center">${tip.value ? `<span class="value">${t("value")}</span>` : ""}<span class="conf ${tip.confidence}">${t("conf_" + tip.confidence)}</span></span>
+        </div>
+      </div>
+      <section class="panels">
+        <div class="panel"><h3>${t("why")}</h3><p class="explain">${why}</p>
+          ${m.correct_scores && m.correct_scores.length ? `<h3 style="margin-top:16px">${t("scores")}</h3><div class="scores">${m.correct_scores.map((s) => `<div><b>${esc(s.score)}</b><span>${pct(s.prob, 1)}</span></div>`).join("")}</div>` : ""}
+        </div>
+        <div class="panel" style="min-width:0"><h3>${t("markets")}</h3>
+          <div class="table-wrap" style="border:0"><table class="std" style="min-width:420px"><thead><tr><th>${t("market")}</th><th>${t("model")}</th><th>${t("market_p")}</th><th>ProScore</th><th>${t("book")}</th><th>Edge</th></tr></thead><tbody>${rows}</tbody></table></div>
+        </div>
+        ${sp !== "tennis" ? `<div class="panel"><h3>${t("compare")}</h3>
+          <table class="cmp"><tbody>
+            <tr><td><b>${esc(m.home)}</b></td><td></td><td><b>${esc(m.away)}</b></td></tr>
+            ${cmp(t("pf"), "pf")}${cmp(t("pa"), "pa")}${cmp(t("winr"), "win", pct)}${hs.over != null ? cmp(t("overr") + ` (${m.odds.total})`, "over", pct) : ""}
+            <tr><td>${m.strength.home_att}</td><td>${t("att")}</td><td>${m.strength.away_att}</td></tr>
+            <tr><td>${m.strength.home_def}</td><td>${t("def")}</td><td>${m.strength.away_def}</td></tr>
+          </tbody></table></div>` : ""}
         <div class="panel"><h3>${t("h2h")}</h3>
           ${m.h2h.length ? `<table class="cmp"><tbody>${m.h2h.map((g) => `<tr><td>${fmtDate(g.date, { day: "2-digit", month: "2-digit", year: "2-digit" })}</td><td>${esc(g.home)} – ${esc(g.away)}</td><td class="mono"><b>${esc(g.score)}</b></td></tr>`).join("")}</tbody></table>` : `<p class="sub">${t("no_h2h")}</p>`}
         </div>
