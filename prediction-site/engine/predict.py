@@ -635,9 +635,13 @@ def main() -> None:
     extra_recent, sport_bt = [], {}
     if not args.demo:
         import other_sports as osp
-        jobs = [("basketball", lambda: osp.run_team_sport("nba", today, CACHE_DIR)),
-                ("hockey", lambda: osp.run_team_sport("nhl", today, CACHE_DIR)),
-                ("tennis", lambda: osp.run_tennis(today, CACHE_DIR))]
+        # NBA and tennis are switched off until a data source that allows automated access is set up
+        # (ESPN, cdn.nba.com and tennis-data.co.uk refuse requests from cloud servers).
+        jobs = [("hockey", lambda: osp.run_team_sport("nhl", today, CACHE_DIR))]
+        if os.environ.get("ENABLE_NBA"):
+            jobs.append(("basketball", lambda: osp.run_team_sport("nba", today, CACHE_DIR)))
+        if os.environ.get("ENABLE_TENNIS"):
+            jobs.append(("tennis", lambda: osp.run_tennis(today, CACHE_DIR)))
         for sport, job in jobs:
             try:
                 sp_preds, sp_fin, sp_recent, sp_n, sp_bt = job()

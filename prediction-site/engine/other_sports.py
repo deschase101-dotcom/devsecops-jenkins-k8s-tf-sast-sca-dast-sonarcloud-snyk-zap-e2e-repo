@@ -111,6 +111,75 @@ def parse_odds(comp: dict) -> dict:
     return {k: v for k, v in out.items() if v is not None}
 
 
+# --------------------------------------------------------------------------- NHL official API
+NHL_WEEK = "https://api-web.nhle.com/v1/schedule/{d}"
+
+
+def load_nhl(start: dt.date, today: dt.date, cache_dir: str) -> list[dict]:
+    """Official NHL schedule: one request returns 7 days. Old weeks are cached forever."""
+    folder = os.path.join(cache_dir, "nhl")
+    os.makedirs(folder, exist_ok=True)
+    weeks = []
+    d = start
+    while d <= today + dt.timedelta(days=2):
+        weeks.append(d)
+        d += dt.timedelta(days=7)
+
+    def get(day: dt.date) -> dict:
+        fp = os.path.join(folder, day.isoformat() + ".json")
+        final = (today - day).days > 10
+        if final and os.path.exists(fp):
+            with open(fp, encoding="utf-8") as fh:
+                return json.load(fh)
+        for attempt in range(4):
+            try:
+                req = urllib.request.Request(NHL_WEEK.format(d=day.isoformat()), headers={"User-Agent": UA})
+                with urllib.request.urlopen(req, timeout=30) as r:
+                    data = json.loads(r.read().decode("utf-8"))
+                if final:
+                    with open(fp, "w", encoding="utf-8") as fh:
+                        json.dump(data, fh)
+                return data
+            except Exception as e:  # noqa: BLE001
+                if attempt == 3:
+                    print(f"  ! nhl {day}: {e}", file=sys.stderr)
+                    return {}
+                time.sleep(2 ** attempt)
+        return {}
+
+    with ThreadPoolExecutor(max_workers=3) as ex:
+        pages = list(ex.map(get, weeks))
+    games, seen = [], set()
+    for page in pages:
+        for day in page.get("gameWeek", []) or []:
+            date = dt.date.fromisoformat(day["date"])
+            for g in day.get("games", []):
+                if g.get("gameType") not in (2, 3) or g["id"] in seen:
+                    continue
+                seen.add(g["id"])
+                h, a = g["homeTeam"], g["awayTeam"]
+                name = lambda t: f'{t.get("placeName", {}).get("default", "")} {t.get("commonName", {}).get("default", "")}'.strip()  # noqa: E731
+                state = g.get("gameState")
+                x = {"id": str(g["id"]), "league": "nhl", "date": date, "kickoff": g.get("startTimeUTC", ""),
+                     "home": name(h), "away": name(a), "home_abbr": h.get("abbrev", ""), "away_abbr": a.get("abbrev", ""),
+                     "final": state in ("OFF", "FINAL"), "scheduled": state in ("FUT", "PRE"), "odds": {}}
+                if x["final"] and "score" in h and "score" in a:
+                    x["hs"], x["as"] = int(h["score"]), int(a["score"])
+                    if (g.get("gameOutcome") or {}).get("lastPeriodType", "REG") == "REG":
+                        x["hr"], x["ar"] = x["hs"], x["as"]
+                    else:  # overtime / shootout: regulation ended level
+                        x["hr"] = x["ar"] = min(x["hs"], x["as"])
+                elif x["final"]:
+                    continue
+                dec = lambda t: [float(o["value"]) for o in t.get("odds", []) if o.get("providerId") in (3, 6)]  # noqa: E731
+                oh, oa = dec(h), dec(a)
+                if oh and oa:
+                    x["odds"] = {"provider": "NHL.com feed", "ml_h": round(sum(oh) / len(oh), 3), "ml_a": round(sum(oa) / len(oa), 3)}
+                games.append(x)
+    games.sort(key=lambda g: g["kickoff"])
+    return games
+
+
 # --------------------------------------------------------------------------- team sports
 def parse_team_games(days: dict[dt.date, dict], key: str) -> list[dict]:
     games = []
@@ -287,8 +356,9 @@ def choose(markets: list[dict]) -> dict:
     value = [m for m in markets if m["edge"] is not None and m["edge"] > 0.03 and m["prob"] >= 0.45]
     if value:
         best = max(value, key=lambda m: m["edge"] * m["prob"])
-    else:
-        best = max(markets, key=lambda m: (m["prob"], m["code"].startswith("ML")))
+    else:  # never tip a price the model says is clearly bad (edge below -3%)
+        ok = [m for m in markets if m["edge"] is None or m["edge"] >= -0.03] or markets
+        best = max(ok, key=lambda m: (m["prob"], m["code"].startswith("ML")))
     conf = "high" if best["prob"] >= 0.72 else "medium" if best["prob"] >= 0.58 else "low"
     return {"market": best["code"], "line": best["line"], "prob": best["prob"],
             "fair_odds": best["fair_odds"], "book_odds": best["odds"], "edge": best["edge"],
@@ -333,8 +403,12 @@ def run_team_sport(key: str, today: dt.date, cache_dir: str) -> tuple:
     cfg = SPORTS[key]
     start = season_start(today) - dt.timedelta(days=365)  # current + previous season
     days = [start + dt.timedelta(days=i) for i in range((today - start).days + 3)]
-    print(f"  {cfg['name']}: fetching {len(days)} days")
-    games = parse_team_games(fetch_days(cfg["path"], days, today, cache_dir), key)
+    if key == "nhl":
+        print(f"  NHL: fetching {len(days) // 7 + 1} weeks from the official NHL API")
+        games = load_nhl(start, today, cache_dir)
+    else:
+        print(f"  {cfg['name']}: fetching {len(days)} days")
+        games = parse_team_games(fetch_days(cfg["path"], days, today, cache_dir), key)
     finals = [g for g in games if g["final"]]
     print(f"  {cfg['name']}: {len(finals)} results")
     if key == "nba":
