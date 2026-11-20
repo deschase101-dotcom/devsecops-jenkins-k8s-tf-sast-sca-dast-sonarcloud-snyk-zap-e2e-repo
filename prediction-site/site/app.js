@@ -47,6 +47,10 @@
       pf: "Scored / game", pa: "Conceded / game", winr: "Win rate", overr: "Over the line", played: "Matches rated",
       model: "Model", market_p: "Market", book: "Odds", by_sport: "By sport", sport: "Sport",
       no_sport: "No games to analyse for this sport today or tomorrow.",
+      projections: "Projections", g_total: "Game total", t_total: "team total", margin: "Margin",
+      props: "Player props", props_top: "Top player props", props_sub: "Most reliable lines from each player's recent games. No bookmaker lines: the line shown is the one he clears about 75% of the time.",
+      player: "Player", min: "Min", safe_line: "Safe line", st_pts: "pts", st_trb: "reb", st_ast: "ast", st_fg3: "3PM", st_pra: "PRA",
+      over_short: "Over", proj_short: "Proj.", last5: "Last 5",
     },
     fr: {
       nav_home: "Accueil", nav_today: "Matchs", nav_coupons: "Coupons", nav_record: "Bilan", nav_tables: "Classements",
@@ -91,6 +95,10 @@
       pf: "Marqués / match", pa: "Encaissés / match", winr: "Victoires", overr: "Au-dessus de la ligne", played: "Matchs notés",
       model: "Modèle", market_p: "Marché", book: "Cote", by_sport: "Par sport", sport: "Sport",
       no_sport: "Aucun match à analyser pour ce sport aujourd'hui ou demain.",
+      projections: "Projections", g_total: "Total du match", t_total: "total équipe", margin: "Écart",
+      props: "Props joueurs", props_top: "Meilleurs props joueurs", props_sub: "Lignes les plus fiables d'après les derniers matchs de chaque joueur. Pas de lignes bookmaker : la ligne affichée est celle qu'il dépasse environ 75 % du temps.",
+      player: "Joueur", min: "Min", safe_line: "Ligne sûre", st_pts: "pts", st_trb: "reb", st_ast: "pd", st_fg3: "3PTS", st_pra: "PRA",
+      over_short: "Plus de", proj_short: "Proj.", last5: "5 derniers",
     },
   };
   let lang = (() => { try { return localStorage.getItem("ps_lang") || (navigator.language || "en").slice(0, 2); } catch { return "en"; } })();
@@ -195,6 +203,19 @@
     </a>`;
   }
 
+  function propsList(list) {
+    return `<div class="table-wrap"><table class="std"><thead><tr><th>${t("player")}</th><th></th><th>${t("proj_short")}</th><th>%</th></tr></thead><tbody>
+      ${list.map((c) => `<tr><td><b>${esc(c.player)}</b><div class="sub">${esc(c.team)}</div></td><td>${t("over_short")} <b>${c.line}</b> ${t("st_" + c.stat)}</td><td class="mono">${c.proj}</td><td class="mono status-won">${pct(c.prob)}</td></tr>`).join("")}
+    </tbody></table></div>`;
+  }
+  function playersTable(team, ps) {
+    if (!ps || !ps.length) return "";
+    const cell = (p, s) => p.safe[s] ? `<b>${p.proj[s]}</b><div class="sub">${t("over_short")} ${p.safe[s].line} · ${pct(p.safe[s].prob)}</div>` : `<b>${p.proj[s]}</b>`;
+    return `<h3 style="margin:14px 0 8px">${esc(team)}</h3><div class="table-wrap"><table class="std" style="min-width:560px"><thead><tr><th>${t("player")}</th><th>${t("min")}</th><th>PTS</th><th>REB</th><th>AST</th><th>3PM</th><th>PRA</th></tr></thead><tbody>
+      ${ps.map((p) => `<tr><td><b>${esc(p.name)}</b><div class="sub">${t("last5")}: ${p.last5.map((l) => l.pts).join(" · ")} pts</div></td><td>${p.min}</td><td>${cell(p, "pts")}</td><td>${cell(p, "trb")}</td><td>${cell(p, "ast")}</td><td>${cell(p, "fg3")}</td><td>${cell(p, "pra")}</td></tr>`).join("")}
+    </tbody></table></div>`;
+  }
+
   function sportTabs(counts) {
     const f = (v, label) => `<button class="filter ${state.sport === v ? "on" : ""}" data-f="sport" data-v="${v}">${label}</button>`;
     return `<div class="filters">${f("all", t("s_all"))}${SPORTS.map((s) => f(s, `${SPORT_ICON[s]} ${t("s_" + s)}${counts && counts[s] != null ? ` · ${counts[s]}` : ""}`)).join("")}</div>`;
@@ -294,6 +315,13 @@
         ${sportTabs(countBy(coupons))}
         ${bySport(coupons).length ? `<div class="grid">${bySport(coupons).map(couponCard).join("")}</div>` : `<div class="empty">${t("no_sport")}</div>`}
       </section>
+      ${(() => {
+        if (!(state.sport === "all" || state.sport === "basketball")) return "";
+        const today = DATA.pred.meta.date;
+        const props = DATA.pred.matches.filter((m) => m.props && (m.date === today || m.date === addDays(today, 1)))
+          .flatMap((m) => m.props.map((c) => ({ ...c, date: m.date }))).sort((a, b) => b.prob - a.prob).slice(0, 12);
+        return props.length ? `<section><div class="section-head"><div><h2>🏀 ${t("props_top")}</h2><div class="sub">${t("props_sub")}</div></div></div>${propsList(props)}</section>` : "";
+      })()}
       ${past.length ? `<section><div class="section-head"><h2>${t("record")}</h2><a href="#record">${t("see_all")}</a></div>
         <div class="grid">${past.map(couponCard).join("")}</div></section>` : ""}`;
   }
@@ -442,6 +470,13 @@
         <div class="panel"><h3>${t("why")}</h3><p class="explain">${why}</p>
           ${m.correct_scores && m.correct_scores.length ? `<h3 style="margin-top:16px">${t("scores")}</h3><div class="scores">${m.correct_scores.map((s) => `<div><b>${esc(s.score)}</b><span>${pct(s.prob, 1)}</span></div>`).join("")}</div>` : ""}
         </div>
+        ${sp !== "tennis" ? `<div class="panel"><h3>${t("projections")}</h3>
+          <table class="cmp"><tbody>
+            <tr><td><b>${(m.xg[0] + m.xg[1]).toFixed(1)}</b></td><td>${t("g_total")}</td><td>${m.odds.total ? "line " + m.odds.total : ""}</td></tr>
+            <tr><td><b>${m.xg[0].toFixed(1)}</b></td><td>${esc(m.home_abbr || m.home)} ${t("t_total")}</td><td></td></tr>
+            <tr><td><b>${m.xg[1].toFixed(1)}</b></td><td>${esc(m.away_abbr || m.away)} ${t("t_total")}</td><td></td></tr>
+            <tr><td><b>${signed(+(m.xg[0] - m.xg[1]).toFixed(1))}</b></td><td>${t("margin")} (${esc(m.home_abbr || m.home)})</td><td></td></tr>
+          </tbody></table></div>` : ""}
         <div class="panel" style="min-width:0"><h3>${t("markets")}</h3>
           <div class="table-wrap" style="border:0"><table class="std" style="min-width:420px"><thead><tr><th>${t("market")}</th><th>${t("model")}</th><th>${t("market_p")}</th><th>ProScore</th><th>${t("book")}</th><th>Edge</th></tr></thead><tbody>${rows}</tbody></table></div>
         </div>
@@ -455,7 +490,11 @@
         <div class="panel"><h3>${t("h2h")}</h3>
           ${m.h2h.length ? `<table class="cmp"><tbody>${m.h2h.map((g) => `<tr><td>${fmtDate(g.date, { day: "2-digit", month: "2-digit", year: "2-digit" })}</td><td>${esc(g.home)} – ${esc(g.away)}</td><td class="mono"><b>${esc(g.score)}</b></td></tr>`).join("")}</tbody></table>` : `<p class="sub">${t("no_h2h")}</p>`}
         </div>
-      </section>`;
+      </section>
+      ${m.players ? `<section><div class="section-head"><div><h2>${t("props")}</h2><div class="sub">${t("props_sub")}</div></div></div>
+        ${m.props && m.props.length ? `<div class="panel" style="margin-bottom:12px">${propsList(m.props)}</div>` : ""}
+        <div class="panel">${playersTable(m.home, m.players.home)}${playersTable(m.away, m.players.away)}</div>
+      </section>` : ""}`;
   }
 
   // ------------------------------------------------------------------ router

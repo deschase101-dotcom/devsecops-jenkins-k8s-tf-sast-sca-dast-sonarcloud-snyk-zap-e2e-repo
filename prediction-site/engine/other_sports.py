@@ -231,7 +231,9 @@ def load_nba(today: dt.date, cache_dir: str) -> list[dict]:
                 date = dt.datetime.strptime(c["date_game"], "%a, %b %d, %Y").date()
             except ValueError:
                 continue
+            box = re.search(r"/boxscores/(\w+)\.html", row)
             g = {"id": f'{date:%Y%m%d}{c["home_team_name"][:3].upper()}{c["visitor_team_name"][:3].upper()}',
+                 "box": box.group(1) if box else None, "season": season,
                  "league": "nba", "date": date, "home": c["home_team_name"], "away": c["visitor_team_name"],
                  "home_abbr": "", "away_abbr": "", "odds": {}, "note": c.get("game_remarks", ""),
                  "time_local": (c.get("game_start_time", "").replace("p", " pm").replace("a", " am") + " ET").strip(),
@@ -520,6 +522,20 @@ def run_team_sport(key: str, today: dt.date, cache_dir: str) -> tuple:
             "strength": {"home_att": round(R.att[g["home"]], 2), "home_def": round(R.dfn[g["home"]], 2),
                          "away_att": round(R.att[g["away"]], 2), "away_def": round(R.dfn[g["away"]], 2)},
         })
+    if key == "nba" and preds:
+        try:
+            import nba_props
+            cur = max(g.get("season", 0) for g in games)
+            cs = [g for g in games if g.get("season") == cur]
+            boxes = nba_props.fetch_boxes(cs, cache_dir)
+            logs, team_dates, names = nba_props.build_logs(cs, boxes)
+            for m in preds:
+                hp = nba_props.project_team(m["home"], m["away"], logs, team_dates, names, R.dfn.get(m["away"], 1.0))
+                ap = nba_props.project_team(m["away"], m["home"], logs, team_dates, names, R.dfn.get(m["home"], 1.0))
+                m["players"] = {"home": hp, "away": ap}
+                m["props"] = nba_props.best_props(hp + ap, m["home"], m["away"])
+        except Exception as e:  # noqa: BLE001  props are optional
+            print(f"  ! NBA player props failed: {e}", file=sys.stderr)
     finished = {f"{key}|{g['id']}": (g["hs"], g["as"]) for g in finals}
     recent = [{"league": key.upper(), "league_name": cfg["name"], "sport": cfg["sport"], "date": g["date"].isoformat(),
                "home": g["home"], "away": g["away"], "score": f'{g["hs"]}-{g["as"]}'}

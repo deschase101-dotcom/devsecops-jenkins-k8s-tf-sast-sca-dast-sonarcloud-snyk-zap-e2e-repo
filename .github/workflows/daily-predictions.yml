@@ -5,6 +5,7 @@ on:
     - cron: "17 6 * * *"   # every day 06:17 UTC
   workflow_dispatch:
   push:
+    branches: [main]
     paths:
       - "prediction-site/**"
       - ".github/workflows/daily-predictions.yml"
@@ -21,12 +22,20 @@ concurrency:
 jobs:
   predict:
     runs-on: ubuntu-latest
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+
+      # keeps downloaded NBA box scores / NHL weeks between runs so only new games are fetched
+      - uses: actions/cache@v4
+        with:
+          path: prediction-site/.cache
+          key: data-cache-${{ github.run_id }}
+          restore-keys: data-cache-
 
       - name: Download results, fit model, predict, settle tips, backtest
         working-directory: prediction-site
