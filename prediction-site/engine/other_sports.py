@@ -180,6 +180,81 @@ def load_nhl(start: dt.date, today: dt.date, cache_dir: str) -> list[dict]:
     return games
 
 
+# --------------------------------------------------------------------------- NBA (basketball-reference.com)
+BREF = "https://www.basketball-reference.com/leagues/NBA_{season}_games-{month}.html"
+NBA_MONTHS = ["october", "november", "december", "january", "february", "march", "april", "may", "june"]
+MONTH_NUM = {m: (10 + i - 1) % 12 + 1 for i, m in enumerate(NBA_MONTHS)}
+
+
+def load_nba(today: dt.date, cache_dir: str) -> list[dict]:
+    """Monthly schedule/results pages (allowed by robots.txt, crawl-delay 3s respected). Past months cached forever."""
+    import html as htmllib
+    import re
+    folder = os.path.join(cache_dir, "nba")
+    os.makedirs(folder, exist_ok=True)
+    cur = today.year + 1 if today.month >= 9 else today.year
+    pages = []
+    for season in (cur - 1, cur):
+        for mon in NBA_MONTHS:
+            year = season - 1 if MONTH_NUM[mon] >= 9 else season
+            first = dt.date(year, MONTH_NUM[mon], 1)
+            if first > today + dt.timedelta(days=2):
+                continue
+            nxt = dt.date(year + (MONTH_NUM[mon] == 12), MONTH_NUM[mon] % 12 + 1, 1)
+            pages.append((season, mon, nxt <= today - dt.timedelta(days=2)))
+    games, last_fetch = [], 0.0
+    for season, mon, done in pages:
+        fp = os.path.join(folder, f"{season}-{mon}.html")
+        if done and os.path.exists(fp):
+            text = open(fp, encoding="utf-8").read()
+        else:
+            wait = 3.5 - (time.time() - last_fetch)
+            if wait > 0:
+                time.sleep(wait)
+            last_fetch = time.time()
+            try:
+                req = urllib.request.Request(BREF.format(season=season, month=mon), headers={"User-Agent": UA})
+                with urllib.request.urlopen(req, timeout=30) as r:
+                    text = r.read().decode("utf-8", errors="replace")
+            except Exception as e:  # noqa: BLE001  (404 = month without games)
+                print(f"  ! nba {season} {mon}: {e}", file=sys.stderr)
+                continue
+            if done:
+                with open(fp, "w", encoding="utf-8") as fh:
+                    fh.write(text)
+        for row in re.findall(r"<tr\s*>(.*?)</tr>", text, re.S):
+            c = {k: htmllib.unescape(re.sub("<[^>]+>", "", v)).strip()
+                 for k, v in re.findall(r'data-stat="(\w+)"[^>]*>(.*?)</t[hd]>', row, re.S)}
+            if "home_team_name" not in c or c.get("date_game") in ("Date", ""):
+                continue
+            try:
+                date = dt.datetime.strptime(c["date_game"], "%a, %b %d, %Y").date()
+            except ValueError:
+                continue
+            g = {"id": f'{date:%Y%m%d}{c["home_team_name"][:3].upper()}{c["visitor_team_name"][:3].upper()}',
+                 "league": "nba", "date": date, "home": c["home_team_name"], "away": c["visitor_team_name"],
+                 "home_abbr": "", "away_abbr": "", "odds": {}, "note": c.get("game_remarks", ""),
+                 "time_local": (c.get("game_start_time", "").replace("p", " pm").replace("a", " am") + " ET").strip(),
+                 "kickoff": f'{date.isoformat()}T{_et_to_utc(c.get("game_start_time", ""))}'}
+            if c.get("home_pts", "").isdigit() and c.get("visitor_pts", "").isdigit():
+                g.update(final=True, scheduled=False, hs=int(c["home_pts"]), **{"as": int(c["visitor_pts"])})
+            else:
+                g.update(final=False, scheduled=date >= today)
+            games.append(g)
+    games.sort(key=lambda g: (g["date"], g["kickoff"]))
+    return games
+
+
+def _et_to_utc(t: str) -> str:
+    """'7:30p' Eastern -> 'HH:MMZ'-ish string (EST = UTC-5; good enough for display)."""
+    import re
+    m = re.match(r"(\d+):(\d+)([ap])", t or "")
+    if not m:
+        return "00:00"
+    h = int(m.group(1)) % 12 + (12 if m.group(3) == "p" else 0)
+    return f"{(h + 5) % 24:02d}:{m.group(2)}"
+
+
 # --------------------------------------------------------------------------- team sports
 def parse_team_games(days: dict[dt.date, dict], key: str) -> list[dict]:
     games = []
@@ -406,6 +481,9 @@ def run_team_sport(key: str, today: dt.date, cache_dir: str) -> tuple:
     if key == "nhl":
         print(f"  NHL: fetching {len(days) // 7 + 1} weeks from the official NHL API")
         games = load_nhl(start, today, cache_dir)
+    elif key == "nba":
+        print("  NBA: loading monthly schedule/results pages")
+        games = load_nba(today, cache_dir)
     else:
         print(f"  {cfg['name']}: fetching {len(days)} days")
         games = parse_team_games(fetch_days(cfg["path"], days, today, cache_dir), key)
@@ -431,7 +509,7 @@ def run_team_sport(key: str, today: dt.date, cache_dir: str) -> tuple:
         tl = g["odds"].get("total")
         preds.append({
             "id": f"{key}|{g['id']}", "sport": cfg["sport"], "league": key.upper(), "country": cfg["country"],
-            "league_name": cfg["name"], "date": g["date"].isoformat(), "time": g["kickoff"][11:16] + " UTC" if g["kickoff"] else "",
+            "league_name": cfg["name"], "date": g["date"].isoformat(), "time": g.get("time_local") or ((g["kickoff"][11:16] + " UTC") if g["kickoff"] else ""),
             "kickoff": g["kickoff"], "home": g["home"], "away": g["away"],
             "home_abbr": g["home_abbr"], "away_abbr": g["away_abbr"],
             "xg": [round(eh, 1 if key == "nba" else 2), round(ea, 1 if key == "nba" else 2)],
