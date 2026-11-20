@@ -48,9 +48,9 @@
       model: "Model", market_p: "Market", book: "Odds", by_sport: "By sport", sport: "Sport",
       no_sport: "No games to analyse for this sport today or tomorrow.",
       projections: "Projections", g_total: "Game total", t_total: "team total", margin: "Margin",
-      props: "Player props", props_top: "Top player props", props_sub: "Most reliable lines from each player's recent games. No bookmaker lines: the line shown is the one he clears about 75% of the time.",
+      props: "Player props", props_top: "Top player props", props_sub: "Most reliable lines from each player's games this season: projection blended with his real hit rate (12/12 = cleared in each of his last 12 games). No bookmaker lines yet.",
       player: "Player", min: "Min", safe_line: "Safe line", st_pts: "pts", st_trb: "reb", st_ast: "ast", st_fg3: "3PM", st_pra: "PRA",
-      over_short: "Over", proj_short: "Proj.", last5: "Last 5",
+      over_short: "Over", proj_short: "Proj.", record_short: "Hit", last5: "Last 5",
     },
     fr: {
       nav_home: "Accueil", nav_today: "Matchs", nav_coupons: "Coupons", nav_record: "Bilan", nav_tables: "Classements",
@@ -96,9 +96,9 @@
       model: "Modèle", market_p: "Marché", book: "Cote", by_sport: "Par sport", sport: "Sport",
       no_sport: "Aucun match à analyser pour ce sport aujourd'hui ou demain.",
       projections: "Projections", g_total: "Total du match", t_total: "total équipe", margin: "Écart",
-      props: "Props joueurs", props_top: "Meilleurs props joueurs", props_sub: "Lignes les plus fiables d'après les derniers matchs de chaque joueur. Pas de lignes bookmaker : la ligne affichée est celle qu'il dépasse environ 75 % du temps.",
+      props: "Props joueurs", props_top: "Meilleurs props joueurs", props_sub: "Lignes les plus fiables d'après les matchs de la saison : projection mélangée avec son taux de réussite réel (12/12 = dépassée lors de ses 12 derniers matchs). Pas encore de lignes bookmaker.",
       player: "Joueur", min: "Min", safe_line: "Ligne sûre", st_pts: "pts", st_trb: "reb", st_ast: "pd", st_fg3: "3PTS", st_pra: "PRA",
-      over_short: "Plus de", proj_short: "Proj.", last5: "5 derniers",
+      over_short: "Plus de", proj_short: "Proj.", record_short: "Réussi", last5: "5 derniers",
     },
   };
   let lang = (() => { try { return localStorage.getItem("ps_lang") || (navigator.language || "en").slice(0, 2); } catch { return "en"; } })();
@@ -204,8 +204,8 @@
   }
 
   function propsList(list) {
-    return `<div class="table-wrap"><table class="std"><thead><tr><th>${t("player")}</th><th></th><th>${t("proj_short")}</th><th>%</th></tr></thead><tbody>
-      ${list.map((c) => `<tr><td><b>${esc(c.player)}</b><div class="sub">${esc(c.team)}</div></td><td>${t("over_short")} <b>${c.line}</b> ${t("st_" + c.stat)}</td><td class="mono">${c.proj}</td><td class="mono status-won">${pct(c.prob)}</td></tr>`).join("")}
+    return `<div class="table-wrap"><table class="std"><thead><tr><th>${t("player")}</th><th></th><th>${t("proj_short")}</th><th>${t("record_short")}</th><th>%</th></tr></thead><tbody>
+      ${list.map((c) => `<tr><td><b>${esc(c.player)}</b><div class="sub">${esc(c.team)}</div></td><td>${t("over_short")} <b>${c.line}</b> ${t("st_" + c.stat)}</td><td class="mono">${c.proj}</td><td class="mono">${esc(c.hit || "")}</td><td class="mono status-won">${pct(c.prob)}</td></tr>`).join("")}
     </tbody></table></div>`;
   }
   function playersTable(team, ps) {

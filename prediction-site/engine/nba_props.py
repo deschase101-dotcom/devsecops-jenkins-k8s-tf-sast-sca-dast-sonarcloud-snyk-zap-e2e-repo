@@ -35,6 +35,18 @@ def _phi(x: float) -> float:
     return 0.5 * (1 + math.erf(x / math.sqrt(2)))
 
 
+def prob_over(stat: str, mu: float, sd: float, line: float, recent: list[float]) -> float:
+    """50/50 blend of the model distribution and the player's own recent hit rate (smoothed)."""
+    if stat == "fg3":  # small whole numbers -> Poisson
+        k = int(math.floor(line))
+        model = 1 - sum(math.exp(-mu) * mu ** i / math.factorial(i) for i in range(k + 1))
+    else:
+        model = 1 - _phi((line + 0.5 - 0.5 - mu) / sd)
+    hits = sum(v > line for v in recent)
+    emp = (hits + 1) / (len(recent) + 2)
+    return 0.5 * model + 0.5 * emp
+
+
 def fetch_boxes(games: list[dict], cache_dir: str, max_new: int | None = None) -> dict[str, str]:
     folder = os.path.join(cache_dir, "nba_box")
     os.makedirs(folder, exist_ok=True)
@@ -140,12 +152,19 @@ def project_team(team: str, opp: str, logs, team_dates, names, opp_def: float, t
             sd[s] = max(math.sqrt(var), SD_FLOOR[s])
         safe = {}
         for s in STATS + ("pra",):
-            line = math.floor(proj[s] - sd[s] * 0.674) - 0.5  # 75th-percentile floor, on a .5 line
-            line = max(line, 0.5)
-            p = 1 - _phi((line - proj[s]) / sd[s])
-            if s == "fg3" and proj[s] < 1.5:
+            vals = [l["pts"] + l["trb"] + l["ast"] if s == "pra" else l[s] for l in lines]
+            if s == "fg3" and proj[s] < 1.2:
                 continue
-            safe[s] = {"line": line, "prob": round(p, 3)}
+            best = None
+            line = math.floor(proj[s]) + 0.5
+            while line >= 0.5:  # highest .5 line he clears >= 75% of the time
+                p = prob_over(s, proj[s], sd[s], line, vals)
+                if p >= SAFE_P:
+                    best = {"line": line, "prob": round(p, 3), "hit": f"{sum(v > line for v in vals)}/{len(vals)}"}
+                    break
+                line -= 1.0
+            if best:
+                safe[s] = best
         out.append({"id": pid, "name": names.get(pid, pid), "team": team, "opp": opp, "min": round(mins, 1),
                     "games": len(lines), "proj": proj, "sd": {k: round(v, 1) for k, v in sd.items()}, "safe": safe,
                     "last5": [{k: l[k] for k in ("pts", "trb", "ast", "fg3")} for l in lines[-5:]]})
@@ -160,9 +179,10 @@ def best_props(players: list[dict], home: str, away: str, n: int = 6) -> list[di
         for s, v in p["safe"].items():
             if s == "pra":
                 continue
-            if v["line"] < {"pts": 9.5, "trb": 3.5, "ast": 2.5, "fg3": 0.5}[s]:
+            if v["line"] < {"pts": 9.5, "trb": 3.5, "ast": 2.5, "fg3": 1.5}[s]:
                 continue
-            cands.append({"player": p["name"], "team": p["team"], "stat": s, "line": v["line"],
+            cands.append({"player": p["name"], "team": p["team"], "stat": s, "line": v["line"], "hit": v["hit"],
                           "prob": v["prob"], "proj": p["proj"][s], "home": home, "away": away})
-    cands.sort(key=lambda c: (-c["prob"], -c["line"]))
+    # rank by probability, but prefer meaningful lines (points lines carry the most information)
+    cands.sort(key=lambda c: -(c["prob"] + {"pts": 0.03, "trb": 0.01, "ast": 0.01, "fg3": 0.0}[c["stat"]]))
     return cands[:n]
