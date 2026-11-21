@@ -162,7 +162,8 @@ def load_nhl(start: dt.date, today: dt.date, cache_dir: str) -> list[dict]:
                 state = g.get("gameState")
                 x = {"id": str(g["id"]), "league": "nhl", "date": date, "kickoff": g.get("startTimeUTC", ""),
                      "home": name(h), "away": name(a), "home_abbr": h.get("abbrev", ""), "away_abbr": a.get("abbrev", ""),
-                     "final": state in ("OFF", "FINAL"), "scheduled": state in ("FUT", "PRE"), "odds": {}}
+                     "final": state in ("OFF", "FINAL"), "scheduled": state in ("FUT", "PRE", "LIVE", "CRIT"),
+                     "live": state in ("LIVE", "CRIT"), "odds": {}}
                 if x["final"] and "score" in h and "score" in a:
                     x["hs"], x["as"] = int(h["score"]), int(a["score"])
                     if (g.get("gameOutcome") or {}).get("lastPeriodType", "REG") == "REG":
@@ -497,7 +498,10 @@ def run_team_sport(key: str, today: dt.date, cache_dir: str) -> tuple:
         R = Ratings(games, today, "hr", "ar", half_life=150)
     preds = []
     for g in games:
-        if not g["scheduled"] or not (today <= g["date"] <= today + dt.timedelta(days=1)):
+        # today's games stay listed all day: upcoming, live, or finished (then shown with the result)
+        if not (today <= g["date"] <= today + dt.timedelta(days=1)):
+            continue
+        if not (g["scheduled"] or (g["final"] and g["date"] == today)):
             continue
         if not R.can(g["home"], g["away"]):
             continue
@@ -513,6 +517,7 @@ def run_team_sport(key: str, today: dt.date, cache_dir: str) -> tuple:
             "id": f"{key}|{g['id']}", "sport": cfg["sport"], "league": key.upper(), "country": cfg["country"],
             "league_name": cfg["name"], "date": g["date"].isoformat(), "time": g.get("time_local") or ((g["kickoff"][11:16] + " UTC") if g["kickoff"] else ""),
             "kickoff": g["kickoff"], "home": g["home"], "away": g["away"],
+            "result": [g["hs"], g["as"]] if g["final"] else None, "live": bool(g.get("live")),
             "home_abbr": g["home_abbr"], "away_abbr": g["away_abbr"],
             "xg": [round(eh, 1 if key == "nba" else 2), round(ea, 1 if key == "nba" else 2)],
             "markets": mkts, "tip": tip, "odds": g["odds"], "correct_scores": scores,

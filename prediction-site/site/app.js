@@ -57,6 +57,8 @@
       dd_sub: "Players to record a double double", td_sub: "Players to record a triple double",
       board_sub: "Chance of each line from ProScore's model (projection blended with the player's real record this season). Tap a category to open it.",
       did: "did it", of: "of",
+      yesterday: "Yesterday", final: "Final", live_now: "LIVE", yesterday_sub: "Yesterday's published tips and how they finished.",
+      no_yesterday: "No settled tips for yesterday yet. Results are added on the next update.",
       c_game: "Game total points", c_team: "Team total points", lines_n: "lines",
       out_title: "Probably out", out_sub: "Missed the team's last two games (no official injury report is used). The projection is lowered for this.",
       ppg: "pts/game", lineup_adj: "lineup-adjusted from", last5: "Last 5",
@@ -114,6 +116,8 @@
       dd_sub: "Joueurs qui feront un double-double", td_sub: "Joueurs qui feront un triple-double",
       board_sub: "Probabilité de chaque ligne selon le modèle ProScore (projection mélangée avec le bilan réel du joueur cette saison). Touchez une catégorie pour l'ouvrir.",
       did: "réussi", of: "sur",
+      yesterday: "Hier", final: "Terminé", live_now: "EN DIRECT", yesterday_sub: "Les pronos publiés hier et leur résultat.",
+      no_yesterday: "Pas encore de pronos validés pour hier. Les résultats sont ajoutés à la prochaine mise à jour.",
       c_game: "Total de points du match", c_team: "Total de points par équipe", lines_n: "lignes",
       out_title: "Probablement absents", out_sub: "Absents lors des deux derniers matchs de l'équipe (pas de rapport officiel des blessures). La projection est réduite en conséquence.",
       ppg: "pts/match", lineup_adj: "ajusté selon l'effectif, base", last5: "5 derniers",
@@ -172,7 +176,7 @@
       <div class="match-top"><span>${esc(m.country)} · ${esc(m.league_name)}</span><span>${fmtDate(m.date)}${m.time ? " · " + esc(m.time) : ""}</span></div>
       <div class="teams">
         <div class="team">${crest(m.home)}<span>${esc(m.home)}</span></div>
-        <div class="vs">xG<b>${m.xg[0].toFixed(1)} – ${m.xg[1].toFixed(1)}</b></div>
+        <div class="vs">${m.result ? centerInfo(m) : `xG<b>${m.xg[0].toFixed(1)} – ${m.xg[1].toFixed(1)}</b>`}</div>
         <div class="team">${crest(m.away)}<span>${esc(m.away)}</span></div>
       </div>
       <div class="probbar"><i class="h" style="width:${p["1"] * 100}%"></i><i class="d" style="width:${p.X * 100}%"></i><i class="a" style="width:${p["2"] * 100}%"></i></div>
@@ -181,7 +185,7 @@
         <span class="tip"><span class="tag">${esc(tip.market)}</span>${esc(mk(tip.market))}</span>
         <span style="display:flex;gap:6px;align-items:center">
           ${tip.value ? `<span class="value">${t("value")}</span>` : ""}
-          <span class="conf ${tip.confidence}">${pct(tip.prob)}</span>
+          ${resultBadge(m)}<span class="conf ${tip.confidence}">${pct(tip.prob)}</span>
           <span class="odds">@${fmtOdds(tip.book_odds || tip.fair_odds)}</span>
         </span>
       </div>
@@ -192,8 +196,39 @@
     const ph = (m.markets.find((x) => x.code === "ML_H") || {}).prob || 0.5;
     return { ph, pa: 1 - ph };
   }
+  // did the tip win, given a final score [home, away]?
+  function tipWon(market, line, h, a) {
+    const tot = h + a;
+    switch (market) {
+      case "1": case "ML_H": return h > a;
+      case "2": case "ML_A": return a > h;
+      case "X": return h === a;
+      case "1X": return h >= a;
+      case "X2": return a >= h;
+      case "12": return h !== a;
+      case "SP_H": return h + line > a;
+      case "SP_A": return a + line > h;
+      case "OV": return tot > line;
+      case "UN": return tot < line;
+      case "BTTS": return h > 0 && a > 0;
+      case "NO_BTTS": return !(h > 0 && a > 0);
+      default: {
+        const mm = /^([OU])(\d+\.5)$/.exec(market);
+        if (mm) return mm[1] === "O" ? tot > +mm[2] : tot < +mm[2];
+        return null;
+      }
+    }
+  }
+  function resultBadge(m) {
+    if (m.result) {
+      const w = tipWon(m.tip.market, m.tip.line, m.result[0], m.result[1]);
+      return w == null ? "" : `<span class="badge ${w ? "won" : "lost"}">${w ? "✅ " + t("won") : "❌ " + t("lost")}</span>`;
+    }
+    return m.live ? `<span class="badge live">● ${t("live_now")}</span>` : "";
+  }
   function centerInfo(m) {
     const sp = sportOf(m);
+    if (m.result) return `${t("final")}<b class="final">${m.result[0]} – ${m.result[1]}</b>`;
     if (sp === "tennis") return `${t("elo")}<b>${m.elo[0]} – ${m.elo[1]}</b>`;
     const d = sp === "basketball" ? 0 : 1;
     return `${t("proj")}<b>${m.xg[0].toFixed(d)} – ${m.xg[1].toFixed(d)}</b>`;
@@ -214,7 +249,7 @@
         <span class="tip"><span class="tag">${esc(tip.market.replace("_", " "))}</span>${esc(mkLabel(tip.market, tip.line, m.home_abbr || m.home, m.away_abbr || m.away))}</span>
         <span style="display:flex;gap:6px;align-items:center">
           ${tip.value ? `<span class="value">${t("value")}</span>` : ""}
-          <span class="conf ${tip.confidence}">${pct(tip.prob)}</span>
+          ${resultBadge(m)}<span class="conf ${tip.confidence}">${pct(tip.prob)}</span>
           <span class="odds">@${fmtOdds(tip.book_odds || tip.fair_odds)}</span>
         </span>
       </div>
@@ -353,7 +388,7 @@
     const { meta, matches } = DATA.pred;
     const today = meta.date;
     let ms = bySport(matches);
-    if (state.day === "today") ms = ms.filter((m) => m.date === today);
+    if (state.day === "today" || state.day === "yesterday") ms = ms.filter((m) => m.date === today);
     else if (state.day === "tomorrow") ms = ms.filter((m) => m.date === addDays(today, 1));
     if (state.league !== "all") ms = ms.filter((m) => m.league === state.league);
     if (state.flag === "value") ms = ms.filter((m) => m.tip.value);
@@ -362,12 +397,23 @@
     const f = (group, val, label) => `<button class="filter ${state[group] === val ? "on" : ""}" data-f="${group}" data-v="${esc(val)}">${esc(label)}</button>`;
     return `<section>
       <div class="section-head"><h2>${t("nav_today")}</h2><span class="sub">${ms.length}</span></div>
-      <div class="filters">${f("day", "today", t("today"))}${f("day", "tomorrow", t("tomorrow"))}${f("day", "week", t("week"))}</div>
+      <div class="filters">${f("day", "yesterday", t("yesterday"))}${f("day", "today", t("today"))}${f("day", "tomorrow", t("tomorrow"))}${f("day", "week", t("week"))}</div>
       ${sportTabs(countBy(matches))}
       <div class="filters">${f("league", "all", t("all"))}${leagues.map((l) => f("league", l, meta.leagues[l]?.name || l)).join("")}</div>
       <div class="filters">${f("flag", "all", t("all"))}${f("flag", "high", t("high_conf"))}${f("flag", "value", t("value_only"))}</div>
-      ${ms.length ? `<div class="grid">${ms.map(matchCard).join("")}</div>` : `<div class="empty">${t("no_matches")}</div>`}
+      ${state.day === "yesterday" ? yesterdayTable() : ms.length ? `<div class="grid">${ms.map(matchCard).join("")}</div>` : `<div class="empty">${t("no_matches")}</div>`}
     </section>`;
+  }
+  function yesterdayTable() {
+    const y = addDays(DATA.pred.meta.date, -1);
+    const tips = bySport(Object.values(DATA.history.tips || {}).filter((x) => x.date === y))
+      .sort((a, b) => (a.sport || "").localeCompare(b.sport || "") || (a.league || "").localeCompare(b.league || ""));
+    if (!tips.length) return `<div class="empty">${t("no_yesterday")}</div>`;
+    const won = tips.filter((x) => x.status === "won").length, done = tips.filter((x) => x.status !== "pending").length;
+    return `<p class="sub">${t("yesterday_sub")} <b>${won}/${done}</b> ${t("won").toLowerCase()}.</p>
+      <div class="table-wrap"><table class="std"><thead><tr><th></th><th>${t("matches")}</th><th>${t("tip")}</th><th>Score</th><th>${t("status")}</th></tr></thead><tbody>
+      ${tips.map((x) => `<tr><td>${SPORT_ICON[x.sport || "soccer"] || ""}</td><td>${esc(x.home)} – ${esc(x.away)}<div class="sub">${esc(x.league_name)}</div></td><td><b>${esc(mkLabel(x.market, x.line, x.home, x.away))}</b><div class="sub">${pct(x.prob)} · @${fmtOdds(x.odds)}</div></td><td class="mono">${esc(x.score || "–")}</td><td class="status-${x.status}">${t(x.status)}</td></tr>`).join("")}
+      </tbody></table></div>`;
   }
 
   function viewCoupons() {
