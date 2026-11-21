@@ -439,7 +439,7 @@ def predict_fixtures(results: dict[str, list[dict]], fixtures: list[dict], today
         country, name = LEAGUES.get(code, ("", code))
         out.append({
             "id": match_id(code, f["date"], f["home"], f["away"]),
-            "sport": "soccer", "league": code, "country": country, "league_name": name,
+            "sport": "soccer", "league": code, "result": f.get("result"), "country": country, "league_name": name,
             "date": f["date"].isoformat(), "time": f.get("time", ""),
             "home": f["home"], "away": f["away"],
             "xg": [round(lh, 2), round(la, 2)],
@@ -629,6 +629,12 @@ def main() -> None:
     if n_res == 0:
         sys.exit("No data downloaded — aborting so the previous site data is kept.")
 
+    # keep today's already-played matches on the site, with their final score
+    known = {match_id(f["league"], f["date"], f["home"], f["away"]) for f in fixtures}
+    for code, ms in results.items():
+        for m in ms:
+            if m["date"] == today and match_id(code, m["date"], m["home"], m["away"]) not in known:
+                fixtures.append({**{k: v for k, v in m.items() if k not in ("hg", "ag")}, "result": [m["hg"], m["ag"]]})
     preds = predict_fixtures(results, fixtures, today)
     coupons = build_coupons(preds, today, "soccer")
     print(f"  soccer: {len(preds)} predictions, {len(coupons)} coupons")
