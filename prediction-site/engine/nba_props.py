@@ -129,7 +129,8 @@ def build_logs(games: list[dict], boxes: dict[str, str]) -> tuple[dict, dict]:
     return logs, team_dates, names
 
 
-def project_team(team: str, opp: str, logs, team_dates, names, opp_def: float, top: int = 7) -> list[dict]:
+def project_team(team: str, opp: str, logs, team_dates, names, opp_def: float, top: int = 7,
+                 injuries: dict | None = None) -> list[dict]:
     dates = team_dates.get(team, [])
     if len(dates) < 3:
         return []
@@ -197,6 +198,17 @@ def project_team(team: str, opp: str, logs, team_dates, names, opp_def: float, t
                     "ladder": ladder, "dd": round(dd, 3), "td": round(td, 3),
                     "dd_real": sum(t >= 2 for t in tens_real), "td_real": sum(t >= 3 for t in tens_real),
                     "last5": [{k: l[k] for k in ("pts", "trb", "ast", "fg3")} for l in lines[-5:]]})
+    if injuries:
+        from nba_injuries import norm
+        kept = []
+        for p in out:
+            rep = injuries.get(norm(p["name"]))
+            if rep and rep["status"] in ("Out", "Doubtful"):
+                continue  # officially not playing: no props
+            if rep and rep["status"] == "Questionable":
+                p["status"] = "Questionable"
+            kept.append(p)
+        out = kept
     out.sort(key=lambda p: -p["min"])
     return out[:top]
 
@@ -217,9 +229,13 @@ def best_props(players: list[dict], home: str, away: str, n: int = 6) -> list[di
     return cands[:n]
 
 
-def missing_players(team: str, logs, team_dates, names, window: int = 10) -> list[dict]:
-    """Regular rotation players (>= 20 min, played >= 5 of the team's last `window` games)
-    who did NOT appear in the team's last two games -> probably injured / resting."""
+def missing_players(team: str, logs, team_dates, names, window: int = 10, injuries: dict | None = None) -> list[dict]:
+    """Players expected to miss the game, with a weight for the projection:
+      * official NBA injury report: Out/Doubtful -> weight 1, Questionable -> 0.5
+      * fallback heuristic: a rotation regular (>= 20 min, >= 5 of the last `window` games) who missed the
+        team's last two games -> weight 1, unless the report lists him Available/Probable."""
+    from nba_injuries import norm
+    injuries = injuries or {}
     dates = team_dates.get(team, [])
     if len(dates) < 4:
         return []
@@ -228,15 +244,24 @@ def missing_players(team: str, logs, team_dates, names, window: int = 10) -> lis
     out = []
     for pid, lines in logs.get(team, {}).items():
         rl = [l for l in lines if l["date"] in recent]
-        if len(rl) < 5 or any(l["date"] in last_two for l in lines):
+        if not rl:
             continue
+        name = names.get(pid, pid)
         mins = sum(l["min"] for l in rl) / len(rl)
-        if mins < 20:
-            continue
-        out.append({"name": names.get(pid, pid), "min": round(mins, 1),
-                    "pts": round(sum(l["pts"] for l in rl) / len(rl), 1),
-                    "last_played": max(l["date"] for l in lines).isoformat()})
-    out.sort(key=lambda x: -x["pts"])
+        rep = injuries.get(norm(name))
+        entry = {"name": name, "min": round(mins, 1), "pts": round(sum(l["pts"] for l in rl) / len(rl), 1),
+                 "last_played": max(l["date"] for l in lines).isoformat()}
+        if rep and rep["status"] in ("Out", "Doubtful", "Questionable"):
+            if mins < 12:
+                continue  # deep bench: no effect on the projection
+            entry.update(status=rep["status"], reason=rep["reason"], source="NBA injury report",
+                         weight=0.5 if rep["status"] == "Questionable" else 1.0)
+            out.append(entry)
+        elif not rep or rep["status"] not in ("Available", "Probable"):
+            if len(rl) >= 5 and mins >= 20 and not any(l["date"] in last_two for l in lines):
+                entry.update(status="Missed last 2 games", reason="", source="ProScore estimate", weight=1.0)
+                out.append(entry)
+    out.sort(key=lambda x: -x["pts"] * x["weight"])
     return out
 
 
