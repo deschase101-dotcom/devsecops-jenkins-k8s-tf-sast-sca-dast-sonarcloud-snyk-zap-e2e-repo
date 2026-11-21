@@ -334,7 +334,7 @@
       <div class="coupon-head">
         <span class="coupon-icon"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="7" rx="2"/><rect x="4" y="13" width="16" height="7" rx="2"/></svg></span>
         <div><small>${fmtDate(c.date)}</small><h3>${SPORT_ICON[c.sport || "soccer"]} ${t("coupon")} · ${t("s_" + (c.sport || "soccer"))}</h3><small class="mono">N° ${esc(c.id.replace(/\D/g, "").slice(0, 10))}</small></div>
-        <span class="coupon-kind kind-${c.kind}">${t("k_" + c.kind)}</span>
+        <span class="coupon-kind kind-${c.kind}">${t("k_" + c.kind)}${c.n ? " #" + c.n : ""}</span>
       </div>
       <dl class="kv">
         <dt>${t("events")}: ${c.picks.length}</dt><dd>${status === "pending" && !done ? "" : `${done}/${c.picks.length}`}</dd>
@@ -636,7 +636,12 @@
       const h = hc[c.id];
       for (const p of c.picks) {
         const t = tips[p.id];
-        if (t && t.status !== "pending") { p.status = t.status; p.score = t.score; }
+        if (t && t.status !== "pending" && t.score) {  // grade the leg on its own market
+          const sc = String(t.score).split("-").map(Number);
+          const w = tipWon(p.market, p.line, sc[0], sc[1]);
+          p.score = t.score;
+          p.status = w == null ? t.status : w ? "won" : "lost";
+        }
       }
       const st = c.picks.map((p) => p.status || "pending");
       c.status = h && h.status !== "pending" ? h.status : st.includes("lost") ? "lost" : st.every((x) => x === "won") ? "won" : "pending";
