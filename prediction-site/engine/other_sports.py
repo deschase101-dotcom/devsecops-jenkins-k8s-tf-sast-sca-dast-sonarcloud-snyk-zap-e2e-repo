@@ -215,7 +215,9 @@ def load_nba(today: dt.date, cache_dir: str) -> list[dict]:
                 time.sleep(wait)
             last_fetch = time.time()
             try:
-                req = urllib.request.Request(BREF.format(season=season, month=mon), headers={"User-Agent": UA})
+                # ask for a fresh copy: a CDN in front of the site can otherwise serve a page from hours ago
+                url = BREF.format(season=season, month=mon) + f"?refresh={int(time.time()) // 600}"
+                req = urllib.request.Request(url, headers={"User-Agent": UA, "Cache-Control": "no-cache", "Pragma": "no-cache"})
                 with urllib.request.urlopen(req, timeout=30) as r:
                     text = r.read().decode("utf-8", errors="replace")
             except Exception as e:  # noqa: BLE001  (404 = month without games)
