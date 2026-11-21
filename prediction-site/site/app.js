@@ -17,7 +17,7 @@
       how2t: "2 · Rate", how2: "A time-weighted Poisson / Dixon–Coles model rates each team's attack, defence and home advantage. Recent games count more.",
       how3t: "3 · Simulate", how3: "Each fixture gets a full scoreline matrix → 1X2, double chance, over/under, BTTS, correct score.",
       how4t: "4 · Verify", how4: "Every tip is settled against the real score and published in the track record. Nothing is deleted.",
-      all: "All", today: "Today", tomorrow: "Tomorrow", week: "Next 7 days", value_only: "Value bets", high_conf: "High confidence",
+      all: "All", today: "Today", tomorrow: "Tomorrow", week: "Next 7 days", month: "Next 30 days", value_only: "Value bets", high_conf: "High confidence",
       no_matches: "No predictions for this filter yet. New fixtures are analysed every morning.",
       tip: "Tip", fair: "fair", value: "VALUE", conf_high: "High", conf_medium: "Medium", conf_low: "Low",
       coupon: "Accumulator", events: "Events", total_odds: "Total odds", model_prob: "Model probability", status: "Status",
@@ -76,7 +76,7 @@
       how2t: "2 · Notation", how2: "Un modèle Poisson / Dixon–Coles pondéré dans le temps note l'attaque, la défense et l'avantage du terrain. Les matchs récents comptent plus.",
       how3t: "3 · Simulation", how3: "Chaque match reçoit une matrice complète de scores → 1X2, double chance, plus/moins, les deux marquent, score exact.",
       how4t: "4 · Vérification", how4: "Chaque prono est validé avec le score réel et publié dans le bilan. Rien n'est supprimé.",
-      all: "Tous", today: "Aujourd'hui", tomorrow: "Demain", week: "7 jours", value_only: "Value bets", high_conf: "Haute confiance",
+      all: "Tous", today: "Aujourd'hui", tomorrow: "Demain", week: "7 jours", month: "30 jours", value_only: "Value bets", high_conf: "Haute confiance",
       no_matches: "Aucun pronostic pour ce filtre. Les nouveaux matchs sont analysés chaque matin.",
       tip: "Prono", fair: "juste", value: "VALUE", conf_high: "Haute", conf_medium: "Moyenne", conf_low: "Faible",
       coupon: "Combiné", events: "Événements", total_odds: "Cote totale", model_prob: "Probabilité modèle", status: "Statut",
@@ -390,6 +390,7 @@
     let ms = bySport(matches);
     if (state.day === "today" || state.day === "yesterday") ms = ms.filter((m) => m.date === today);
     else if (state.day === "tomorrow") ms = ms.filter((m) => m.date === addDays(today, 1));
+    else if (state.day === "week") ms = ms.filter((m) => m.date <= addDays(today, 7));
     if (state.league !== "all") ms = ms.filter((m) => m.league === state.league);
     if (state.flag === "value") ms = ms.filter((m) => m.tip.value);
     if (state.flag === "high") ms = ms.filter((m) => m.tip.confidence === "high");
@@ -397,7 +398,7 @@
     const f = (group, val, label) => `<button class="filter ${state[group] === val ? "on" : ""}" data-f="${group}" data-v="${esc(val)}">${esc(label)}</button>`;
     return `<section>
       <div class="section-head"><h2>${t("nav_today")}</h2><span class="sub">${ms.length}</span></div>
-      <div class="filters">${f("day", "yesterday", t("yesterday"))}${f("day", "today", t("today"))}${f("day", "tomorrow", t("tomorrow"))}${f("day", "week", t("week"))}</div>
+      <div class="filters">${f("day", "yesterday", t("yesterday"))}${f("day", "today", t("today"))}${f("day", "tomorrow", t("tomorrow"))}${f("day", "week", t("week"))}${f("day", "month", t("month"))}</div>
       ${sportTabs(countBy(matches))}
       <div class="filters">${f("league", "all", t("all"))}${leagues.map((l) => f("league", l, meta.leagues[l]?.name || l)).join("")}</div>
       <div class="filters">${f("flag", "all", t("all"))}${f("flag", "high", t("high_conf"))}${f("flag", "value", t("value_only"))}</div>

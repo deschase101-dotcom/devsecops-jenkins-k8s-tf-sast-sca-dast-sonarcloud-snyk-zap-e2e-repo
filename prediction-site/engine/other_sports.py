@@ -26,6 +26,7 @@ from concurrent.futures import ThreadPoolExecutor
 ESPN = "https://site.api.espn.com/apis/site/v2/sports/{path}/scoreboard?dates={d}&limit=500"
 UA = "Mozilla/5.0 (compatible; ProScoreBot/1.0)"
 MODEL_WEIGHT = 0.6
+HORIZON_DAYS = 30  # predict NBA/NHL games up to this many days ahead
 
 SPORTS = {
     "nba": {"path": "basketball/nba", "sport": "basketball", "name": "NBA", "country": "USA"},
@@ -121,7 +122,7 @@ def load_nhl(start: dt.date, today: dt.date, cache_dir: str) -> list[dict]:
     os.makedirs(folder, exist_ok=True)
     weeks = []
     d = start
-    while d <= today + dt.timedelta(days=2):
+    while d <= today + dt.timedelta(days=HORIZON_DAYS + 1):
         weeks.append(d)
         d += dt.timedelta(days=7)
 
@@ -199,7 +200,7 @@ def load_nba(today: dt.date, cache_dir: str) -> list[dict]:
         for mon in NBA_MONTHS:
             year = season - 1 if MONTH_NUM[mon] >= 9 else season
             first = dt.date(year, MONTH_NUM[mon], 1)
-            if first > today + dt.timedelta(days=2):
+            if first > today + dt.timedelta(days=HORIZON_DAYS + 1):
                 continue
             nxt = dt.date(year + (MONTH_NUM[mon] == 12), MONTH_NUM[mon] % 12 + 1, 1)
             pages.append((season, mon, nxt <= today - dt.timedelta(days=2)))
@@ -499,7 +500,7 @@ def run_team_sport(key: str, today: dt.date, cache_dir: str) -> tuple:
     preds = []
     for g in games:
         # today's games stay listed all day: upcoming, live, or finished (then shown with the result)
-        if not (today <= g["date"] <= today + dt.timedelta(days=1)):
+        if not (today <= g["date"] <= today + dt.timedelta(days=HORIZON_DAYS)):
             continue
         if not (g["scheduled"] or (g["final"] and g["date"] == today)):
             continue
@@ -535,6 +536,10 @@ def run_team_sport(key: str, today: dt.date, cache_dir: str) -> tuple:
             boxes = nba_props.fetch_boxes(cs, cache_dir)
             logs, team_dates, names = nba_props.build_logs(cs, boxes)
             for m in preds:
+                if dt.date.fromisoformat(m["date"]) > today + dt.timedelta(days=1):
+                    # games further out: totals ladder only (lineups/props are only meaningful close to tip-off)
+                    m["totals"] = nba_props.totals_ladder(*m["xg"])
+                    continue
                 hp = nba_props.project_team(m["home"], m["away"], logs, team_dates, names, R.dfn.get(m["away"], 1.0))
                 ap = nba_props.project_team(m["away"], m["home"], logs, team_dates, names, R.dfn.get(m["home"], 1.0))
                 m["players"] = {"home": hp, "away": ap}
