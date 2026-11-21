@@ -457,6 +457,30 @@ def predict_fixtures(results: dict[str, list[dict]], fixtures: list[dict], today
     return out
 
 
+SAFE_COUPONS = 5
+SAFE_MIN = 0.75
+SAFE_SOCCER_MARKETS = ["1X", "X2", "12", "O1.5", "U3.5", "1", "2"]
+
+
+def safe_pick(m: dict, sport: str) -> dict | None:
+    """The single most likely market of a match (a 'banker' leg), if it is at least SAFE_MIN."""
+    if m.get("result"):
+        return None  # already played
+    if sport == "soccer":
+        mk_, p = max(((k, m["probs"][k]) for k in SAFE_SOCCER_MARKETS), key=lambda kv: kv[1])
+        line = None
+    else:
+        best = max(m["markets"], key=lambda x: x["prob"])
+        mk_, p, line = best["code"], best["prob"], best.get("line")
+    if p < SAFE_MIN:
+        return None
+    t = m["tip"]
+    book = t["book_odds"] if t["market"] == mk_ else None
+    return {"id": m["id"], "league": m["league"], "league_name": m["league_name"], "country": m["country"],
+            "date": m["date"], "time": m["time"], "home": m["home"], "away": m["away"], "sport": sport,
+            "market": mk_, "line": line, "prob": round(p, 4), "odds": book or round(1 / p, 2)}
+
+
 def build_coupons(preds: list[dict], today: dt.date, sport: str = "soccer") -> list[dict]:
     coupons = []
     for day_offset in range(2):
@@ -480,10 +504,18 @@ def build_coupons(preds: list[dict], today: dt.date, sport: str = "soccer") -> l
             return {"id": f"{day}|{sport}|{kind}", "sport": sport, "date": day, "kind": kind, "picks": picks,
                     "total_odds": round(odds, 2), "prob": round(prob, 4)}
 
-        safe = sorted((m for m in todays if m["tip"]["prob"] >= 0.70), key=lambda m: -m["tip"]["prob"])[:3]
+        # Safe coupons: up to SAFE_COUPONS different 3-leg coupons (no match repeated), each leg on the
+        # match's safest market (>= 75%), best legs first.
+        legs = sorted((sp for m in todays if (sp := safe_pick(m, sport))), key=lambda p: -p["prob"])
+        n_safe = min(SAFE_COUPONS, len(legs) // 3)
+        for i in range(n_safe):
+            c = mk("safe" if i == 0 else f"safe{i + 1}", legs[i * 3:(i + 1) * 3])
+            if c:
+                c["kind"], c["n"] = "safe", i + 1
+                coupons.append(c)
         value = sorted((m for m in todays if m["tip"]["value"]), key=lambda m: -(m["tip"]["edge"] or 0))[:4]
         big = sorted((m for m in todays if m["tip"]["prob"] >= 0.55), key=lambda m: -m["tip"]["prob"])[:8]
-        for kind, ms in (("safe", safe), ("value", value), ("mega", big)):
+        for kind, ms in (("value", value), ("mega", big)):
             c = mk(kind, [pick(m) for m in ms])
             if c:
                 coupons.append(c)
@@ -535,10 +567,11 @@ def settle_history(history: dict, finished: dict, preds: list[dict], coupons: li
             continue
         states = []
         for p in c["picks"]:
-            tp = tips.get(p["id"])
-            states.append(tp["status"] if tp else "pending")
-            if tp:
-                p["status"], p["score"] = tp["status"], tp["score"]
+            if p["id"] in finished:
+                hg, ag = finished[p["id"]]
+                p["score"] = f"{hg}-{ag}"
+                p["status"] = "won" if tip_won(p["market"], hg, ag, p.get("line")) else "lost"
+            states.append(p.get("status", "pending"))
         if "lost" in states:
             c["status"] = "lost"
         elif all(s == "won" for s in states):
