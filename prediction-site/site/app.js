@@ -56,7 +56,7 @@
       c_stl: "Player steals", c_blk: "Player blocks", c_dd: "Double double", c_td: "Triple double",
       dd_sub: "Players to record a double double", td_sub: "Players to record a triple double",
       board_sub: "Chance of each line from ProScore's model (projection blended with the player's real record this season). Tap a category to open it.",
-      did: "did it", of: "of",
+      did: "did it", of: "of", past_results: "Past results", no_past: "No settled coupons yet.",
       yesterday: "Yesterday", final: "Final", live_now: "LIVE", yesterday_sub: "Yesterday's published tips and how they finished.",
       no_yesterday: "No settled tips for yesterday yet. Results are added on the next update.",
       c_game: "Game total points", c_team: "Team total points", lines_n: "lines",
@@ -115,7 +115,7 @@
       c_stl: "Interceptions", c_blk: "Contres", c_dd: "Double-double", c_td: "Triple-double",
       dd_sub: "Joueurs qui feront un double-double", td_sub: "Joueurs qui feront un triple-double",
       board_sub: "Probabilité de chaque ligne selon le modèle ProScore (projection mélangée avec le bilan réel du joueur cette saison). Touchez une catégorie pour l'ouvrir.",
-      did: "réussi", of: "sur",
+      did: "réussi", of: "sur", past_results: "Résultats passés", no_past: "Pas encore de coupons validés.",
       yesterday: "Hier", final: "Terminé", live_now: "EN DIRECT", yesterday_sub: "Les pronos publiés hier et leur résultat.",
       no_yesterday: "Pas encore de pronos validés pour hier. Les résultats sont ajoutés à la prochaine mise à jour.",
       c_game: "Total de points du match", c_team: "Total de points par équipe", lines_n: "lignes",
@@ -383,7 +383,7 @@
       <p class="sub" style="text-align:center;margin-top:24px">${t("updated")}: ${new Date(meta.generated_at).toLocaleString(lang === "fr" ? "fr-FR" : "en-GB")}</p>`;
   }
 
-  const state = { day: "today", league: "all", flag: "all", sport: "all", ptab: "props" };
+  const state = { day: "today", league: "all", flag: "all", sport: "all", ptab: "props", cday: "today" };
   function viewToday() {
     const { meta, matches } = DATA.pred;
     const today = meta.date;
@@ -418,24 +418,36 @@
   }
 
   function viewCoupons() {
-    const { coupons } = DATA.pred;
-    const past = bySport(Object.values(DATA.history.coupons || {})).filter((c) => c.status !== "pending")
-      .sort((a, b) => b.date.localeCompare(a.date)).slice(0, 9);
+    const today = DATA.pred.meta.date;
+    const day = state.cday || "today";
+    let list;
+    if (day === "past") {
+      // settled coupons from earlier days (newest first), plus today's that are already decided
+      const hist = Object.values(DATA.history.coupons || {}).filter((c) => c.status !== "pending" && c.date < today);
+      const todayDone = DATA.pred.coupons.filter((c) => c.date === today && c.status && c.status !== "pending");
+      list = [...todayDone, ...hist].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 30);
+    } else {
+      const d = day === "tomorrow" ? addDays(today, 1) : today;
+      // only coupons still in play; decided ones move to "Past results"
+      list = DATA.pred.coupons.filter((c) => c.date === d && (!c.status || c.status === "pending"));
+    }
+    const f = (v, label) => `<button class="filter ${day === v ? "on" : ""}" data-f="cday" data-v="${v}">${label}</button>`;
+    const shown = bySport(list);
     return `<section>
-        <div class="section-head"><h2>${t("coupons_today")}</h2></div>
-        ${sportTabs(countBy(coupons))}
-        ${bySport(coupons).length ? `<div class="grid">${bySport(coupons).map(couponCard).join("")}</div>` : `<div class="empty">${t("no_sport")}</div>`}
+        <div class="section-head"><h2>${t("nav_coupons")}</h2><span class="sub">${shown.length}</span></div>
+        <div class="filters">${f("today", t("today"))}${f("tomorrow", t("tomorrow"))}${f("past", t("past_results"))}</div>
+        ${sportTabs(countBy(list))}
+        ${shown.length ? `<div class="grid">${shown.map(couponCard).join("")}</div>` : `<div class="empty">${day === "past" ? t("no_past") : t("no_sport")}</div>`}
       </section>
       ${(() => {
-        if (!(state.sport === "all" || state.sport === "basketball")) return "";
-        const today = DATA.pred.meta.date;
-        const props = DATA.pred.matches.filter((m) => m.props && (m.date === today || m.date === addDays(today, 1)))
+        if (day === "past" || !(state.sport === "all" || state.sport === "basketball")) return "";
+        const d = day === "tomorrow" ? addDays(today, 1) : today;
+        const props = DATA.pred.matches.filter((m) => m.props && m.date === d)
           .flatMap((m) => m.props.map((c) => ({ ...c, date: m.date }))).sort((a, b) => b.prob - a.prob).slice(0, 12);
         return props.length ? `<section><div class="section-head"><div><h2>🏀 ${t("props_top")}</h2><div class="sub">${t("props_sub")}</div></div></div>${propsList(props)}</section>` : "";
-      })()}
-      ${past.length ? `<section><div class="section-head"><h2>${t("record")}</h2><a href="#record">${t("see_all")}</a></div>
-        <div class="grid">${past.map(couponCard).join("")}</div></section>` : ""}`;
+      })()}`;
   }
+
 
   function viewRecord() {
     const r = DATA.pred.meta.record || {};
