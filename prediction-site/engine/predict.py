@@ -617,7 +617,9 @@ def main() -> None:
     ap.add_argument("--date", help="override today (YYYY-MM-DD)")
     args = ap.parse_args()
 
-    today = dt.date.fromisoformat(args.date) if args.date else dt.date.today()
+    # "today" follows US Eastern time so an evening NBA/NHL slate stays on the site until the night is over
+    from zoneinfo import ZoneInfo
+    today = dt.date.fromisoformat(args.date) if args.date else dt.datetime.now(ZoneInfo("America/New_York")).date()
     os.makedirs(DATA_DIR, exist_ok=True)
     print(f"ProScore engine — {today} — {'DEMO' if args.demo else 'LIVE'} data")
 
