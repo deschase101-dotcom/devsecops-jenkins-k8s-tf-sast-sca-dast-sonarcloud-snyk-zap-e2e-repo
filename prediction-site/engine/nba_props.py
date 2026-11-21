@@ -215,3 +215,42 @@ def best_props(players: list[dict], home: str, away: str, n: int = 6) -> list[di
     # rank by probability, but prefer meaningful lines (points lines carry the most information)
     cands.sort(key=lambda c: -(c["prob"] + {"pts": 0.03, "trb": 0.01, "ast": 0.01, "fg3": 0.0}[c["stat"]]))
     return cands[:n]
+
+
+def missing_players(team: str, logs, team_dates, names, window: int = 10) -> list[dict]:
+    """Regular rotation players (>= 20 min, played >= 5 of the team's last `window` games)
+    who did NOT appear in the team's last two games -> probably injured / resting."""
+    dates = team_dates.get(team, [])
+    if len(dates) < 4:
+        return []
+    recent = set(dates[-window:])
+    last_two = set(dates[-2:])
+    out = []
+    for pid, lines in logs.get(team, {}).items():
+        rl = [l for l in lines if l["date"] in recent]
+        if len(rl) < 5 or any(l["date"] in last_two for l in lines):
+            continue
+        mins = sum(l["min"] for l in rl) / len(rl)
+        if mins < 20:
+            continue
+        out.append({"name": names.get(pid, pid), "min": round(mins, 1),
+                    "pts": round(sum(l["pts"] for l in rl) / len(rl), 1),
+                    "last_played": max(l["date"] for l in lines).isoformat()})
+    out.sort(key=lambda x: -x["pts"])
+    return out
+
+
+def totals_ladder(eh: float, ea: float) -> dict:
+    """P(over) at lines around the projection. Game total sd ~17.5, team total sd ~12 (NBA history)."""
+    def phi(x):
+        return 0.5 * (1 + math.erf(x / math.sqrt(2)))
+    def ladder(mu, sd, steps):
+        base = round(mu)
+        rows = []
+        for d in steps:
+            line = base + d - 0.5
+            rows.append({"line": line, "p": round(1 - phi((line - mu) / sd), 3)})
+        return rows
+    return {"game": ladder(eh + ea, 17.5, [-15, -10, -5, 0, 5, 10, 15]),
+            "home": ladder(eh, 12.0, [-10, -5, 0, 5, 10]),
+            "away": ladder(ea, 12.0, [-10, -5, 0, 5, 10])}

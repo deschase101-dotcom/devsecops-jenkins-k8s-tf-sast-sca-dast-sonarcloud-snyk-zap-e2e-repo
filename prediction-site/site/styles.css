@@ -239,3 +239,7 @@ table.std td b { font-family: "JetBrains Mono", monospace; }
 .rung { flex: none; display: flex; flex-direction: column; align-items: center; min-width: 54px; padding: 6px 8px; border-radius: 10px; border: 1px solid var(--line);
   background: linear-gradient(0deg, rgba(52,211,153,.22) var(--heat), transparent var(--heat)), var(--bg-2); font: 600 12px "JetBrains Mono", monospace; color: var(--muted); }
 .rung b { color: var(--text); font-size: 13px; }
+
+.panel.out { margin-top: 10px; border-color: rgba(251,191,36,.45); background: rgba(251,191,36,.07); }
+.panel.out ul { margin: 8px 0; padding-left: 18px; }
+.panel.out li { margin: 3px 0; }

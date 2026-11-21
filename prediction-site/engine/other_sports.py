@@ -534,6 +534,20 @@ def run_team_sport(key: str, today: dt.date, cache_dir: str) -> tuple:
                 ap = nba_props.project_team(m["away"], m["home"], logs, team_dates, names, R.dfn.get(m["home"], 1.0))
                 m["players"] = {"home": hp, "away": ap}
                 m["props"] = nba_props.best_props(hp + ap, m["home"], m["away"])
+                # lineup adjustment: a team missing regular scorers loses ~30% of their points (capped at 8);
+                # team-mates absorb the rest, and the ratings already include part of the absence
+                mh = nba_props.missing_players(m["home"], logs, team_dates, names)
+                ma = nba_props.missing_players(m["away"], logs, team_dates, names)
+                eh, ea = m["xg"]
+                eh_adj = eh - min(8.0, 0.3 * sum(x["pts"] for x in mh))
+                ea_adj = ea - min(8.0, 0.3 * sum(x["pts"] for x in ma))
+                m["missing"] = {"home": mh, "away": ma}
+                m["xg_base"] = [eh, ea]
+                m["xg"] = [round(eh_adj, 1), round(ea_adj, 1)]
+                if mh or ma:
+                    m["markets"] = nba_markets(eh_adj, ea_adj, m["odds"])
+                    m["tip"] = choose(m["markets"])
+                m["totals"] = nba_props.totals_ladder(eh_adj, ea_adj)
         except Exception as e:  # noqa: BLE001  props are optional
             print(f"  ! NBA player props failed: {e}", file=sys.stderr)
     finished = {f"{key}|{g['id']}": (g["hs"], g["as"]) for g in finals}

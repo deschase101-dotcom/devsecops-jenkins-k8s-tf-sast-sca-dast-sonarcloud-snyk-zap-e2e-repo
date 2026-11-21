@@ -56,7 +56,10 @@
       c_stl: "Player steals", c_blk: "Player blocks", c_dd: "Double double", c_td: "Triple double",
       dd_sub: "Players to record a double double", td_sub: "Players to record a triple double",
       board_sub: "Chance of each line from ProScore's model (projection blended with the player's real record this season). Tap a category to open it.",
-      did: "did it", of: "of", last5: "Last 5",
+      did: "did it", of: "of",
+      c_game: "Game total points", c_team: "Team total points", lines_n: "lines",
+      out_title: "Probably out", out_sub: "Missed the team's last two games (no official injury report is used). The projection is lowered for this.",
+      ppg: "pts/game", lineup_adj: "lineup-adjusted from", last5: "Last 5",
     },
     fr: {
       nav_home: "Accueil", nav_today: "Matchs", nav_coupons: "Coupons", nav_record: "Bilan", nav_tables: "Classements",
@@ -110,7 +113,10 @@
       c_stl: "Interceptions", c_blk: "Contres", c_dd: "Double-double", c_td: "Triple-double",
       dd_sub: "Joueurs qui feront un double-double", td_sub: "Joueurs qui feront un triple-double",
       board_sub: "Probabilité de chaque ligne selon le modèle ProScore (projection mélangée avec le bilan réel du joueur cette saison). Touchez une catégorie pour l'ouvrir.",
-      did: "réussi", of: "sur", last5: "5 derniers",
+      did: "réussi", of: "sur",
+      c_game: "Total de points du match", c_team: "Total de points par équipe", lines_n: "lignes",
+      out_title: "Probablement absents", out_sub: "Absents lors des deux derniers matchs de l'équipe (pas de rapport officiel des blessures). La projection est réduite en conséquence.",
+      ppg: "pts/match", lineup_adj: "ajusté selon l'effectif, base", last5: "5 derniers",
     },
   };
   let lang = (() => { try { return localStorage.getItem("ps_lang") || (navigator.language || "en").slice(0, 2); } catch { return "en"; } })();
@@ -236,7 +242,7 @@
     const ph = (m.markets.find((x) => x.code === "ML_H") || {}).prob || 0.5;
     const teamRow = (name, p) => `<div class="mrow">${crest(name)}<span class="mname">${esc(name)}</span>
       <span class="pill yes">${t("yes")} ${pct(p)}</span><span class="pill no">${t("no")} ${pct(1 - p)}</span></div>`;
-    const cat = (key, rowsHtml, n, sub) => `<details class="acc"${key === "pts" ? " open" : ""}>
+    const cat = (key, rowsHtml, n, sub) => `<details class="acc">
       <summary><span><b>${t("c_" + key)}</b>${sub ? `<small>${sub}</small>` : ""}</span><span class="cnt">${n} ${t("players_n")}</span></summary>
       <div class="acc-body">${rowsHtml}</div></details>`;
     const ladderCat = (s) => {
@@ -253,9 +259,22 @@
         <div class="rungs"><span class="rung" style="${heat(p[field])}"><b>${t("yes")}</b>${pct(p[field])}</span></div></div>`).join("");
       return cat(key, rows, ps.length, t(key + "_sub"));
     };
+    const tot = m.totals;
+    const totRow = (label, sub, rows) => `<div class="lrow"><div class="lwho"><b>${esc(label)}</b><small>${sub}</small></div>
+      <div class="rungs">${rows.map((r) => `<span class="rung" style="${heat(r.p)}"><b>${r.line}+</b>${pct(r.p)}</span>`).join("")}</div></div>`;
+    const totals = tot ? `<details class="acc" open><summary><span><b>${t("c_game")}</b></span><span class="cnt">${tot.game.length} ${t("lines_n")}</span></summary>
+        <div class="acc-body">${totRow(`${abbr(m.home)} + ${abbr(m.away)}`, `${t("proj_short")} ${(m.xg[0] + m.xg[1]).toFixed(1)}`, tot.game)}</div></details>
+      <details class="acc" open><summary><span><b>${t("c_team")}</b></span><span class="cnt">2 ${lang === "fr" ? "équipes" : "teams"}</span></summary>
+        <div class="acc-body">${totRow(m.home, `${t("proj_short")} ${m.xg[0].toFixed(1)}`, tot.home)}${totRow(m.away, `${t("proj_short")} ${m.xg[1].toFixed(1)}`, tot.away)}</div></details>` : "";
+    const miss = m.missing ? [...m.missing.home.map((x) => ({ ...x, team: m.home })), ...m.missing.away.map((x) => ({ ...x, team: m.away }))] : [];
+    const missing = miss.length ? `<div class="panel out"><b>⚠️ ${t("out_title")}</b>
+        <ul>${miss.map((x) => `<li><b>${esc(x.name)}</b> <span class="sub">${esc(abbr(x.team))} · ${x.pts} ${t("ppg")} · ${x.min} min</span></li>`).join("")}</ul>
+        <small class="sub">${t("out_sub")}${m.xg_base ? ` (${t("lineup_adj")} ${m.xg_base[0].toFixed(1)} – ${m.xg_base[1].toFixed(1)})` : ""}</small></div>` : "";
     return `<div class="board">
       <div class="board-teams">${teamRow(m.home, ph)}${teamRow(m.away, 1 - ph)}</div>
+      ${missing}
       <p class="sub" style="margin:4px 2px 10px">${t("board_sub")}</p>
+      ${totals}
       ${["pts", "ast", "trb", "fg3", "stl", "blk"].map(ladderCat).join("")}
       ${multiCat("dd", "dd", "dd_real")}${multiCat("td", "td", "td_real")}
     </div>`;
