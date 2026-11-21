@@ -629,6 +629,16 @@ def main() -> None:
     if n_res == 0:
         sys.exit("No data downloaded — aborting so the previous site data is kept.")
 
+    if not args.demo:  # faster results (about a day after the match) so recent tips can be settled
+        import fd_results
+        n_fd = fd_results.merge(results, fixtures, fd_results.fetch(today))
+        print(f"  football-data.org: {n_fd} recent results added")
+    # attach final scores to fixtures that have been played (fixtures.csv can still list them)
+    finals = {match_id(c, m["date"], m["home"], m["away"]): (m["hg"], m["ag"]) for c, ms in results.items() for m in ms}
+    for f in fixtures:
+        r = finals.get(match_id(f["league"], f["date"], f["home"], f["away"]))
+        if r:
+            f["result"] = list(r)
     # keep today's already-played matches on the site, with their final score
     known = {match_id(f["league"], f["date"], f["home"], f["away"]) for f in fixtures}
     for code, ms in results.items():

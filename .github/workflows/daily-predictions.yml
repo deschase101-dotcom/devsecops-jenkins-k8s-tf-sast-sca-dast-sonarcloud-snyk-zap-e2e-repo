@@ -40,6 +40,8 @@ jobs:
 
       - name: Download results, fit model, predict, settle tips, backtest
         working-directory: prediction-site
+        env:
+          FOOTBALL_DATA_TOKEN: ${{ secrets.FOOTBALL_DATA_TOKEN }}
         run: python engine/predict.py
 
       - name: Commit updated data (keeps the track record)
