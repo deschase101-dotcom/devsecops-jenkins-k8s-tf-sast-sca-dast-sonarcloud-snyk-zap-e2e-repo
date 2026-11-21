@@ -42,6 +42,7 @@ jobs:
         working-directory: prediction-site
         env:
           FOOTBALL_DATA_TOKEN: ${{ secrets.FOOTBALL_DATA_TOKEN }}
+          APISPORTS_KEY: ${{ secrets.APISPORTS_KEY }}
         run: python engine/predict.py
 
       - name: Commit updated data (keeps the track record)

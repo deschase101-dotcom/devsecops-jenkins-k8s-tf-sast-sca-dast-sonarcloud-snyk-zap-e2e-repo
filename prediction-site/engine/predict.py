@@ -631,7 +631,9 @@ def main() -> None:
 
     if not args.demo:  # faster results (about a day after the match) so recent tips can be settled
         import fd_results
-        n_fd = fd_results.merge(results, fixtures, fd_results.fetch(today))
+        n_af = fd_results.merge(results, fixtures, fd_results.fetch_api_football(today))
+        print(f"  API-Football: {n_af} recent results added")
+        n_fd = fd_results.merge(results, fixtures, fd_results.fetch(today))  # backup source
         print(f"  football-data.org: {n_fd} recent results added")
     # attach final scores to fixtures that have been played (fixtures.csv can still list them)
     finals = {match_id(c, m["date"], m["home"], m["away"]): (m["hg"], m["ag"]) for c, ms in results.items() for m in ms}

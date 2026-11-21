@@ -28,7 +28,21 @@ def _norm(name: str) -> str:
     s = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode().lower()
     s = s.replace("münchen", "munich").replace("munchen", "munich").replace("koln", "koln")
     words = [w for w in re.split(r"[^a-z0-9]+", s) if w and w not in STOP]
-    return " ".join(words)
+    out = " ".join(words)
+    for k, v in ALIASES.items():
+        if out == k:
+            return v
+    return out
+
+
+# football-data.co.uk short names -> names used by the APIs (after normalisation)
+ALIASES = {"ath bilbao": "athletic", "athletic club": "athletic", "ath madrid": "atletico madrid",
+           "espanol": "espanyol", "espanyol barcelona": "espanyol", "sociedad": "real sociedad", "betis": "real betis",
+           "man united": "manchester united", "man city": "manchester city", "nott m forest": "nottingham forest",
+           "sheffield weds": "sheffield wednesday", "qpr": "queens park rangers", "wolves": "wolverhampton",
+           "paris sg": "paris saint germain", "psg": "paris saint germain", "inter": "inter milan", "milan": "ac milan",
+           "dortmund": "borussia dortmund", "m gladbach": "borussia monchengladbach", "ein frankfurt": "eintracht frankfurt",
+           "leverkusen": "bayer leverkusen", "sp lisbon": "sporting cp", "sporting": "sporting cp"}
 
 
 def _sim(a: str, b: str) -> float:
@@ -96,3 +110,45 @@ def merge(results: dict[str, list[dict]], fixtures: list[dict], fd: list[dict]) 
                                              "hg": x["hg"], "ag": x["ag"], "odds": {}, "source": "football-data.org"})
         added += 1
     return added
+
+
+# --------------------------------------------------------------------------- API-Football (api-sports.io)
+AF_API = "https://v3.football.api-sports.io/fixtures?date={d}"
+AF_MAP = {("England", "Premier League"): "E0", ("England", "Championship"): "E1", ("Spain", "La Liga"): "SP1",
+          ("Italy", "Serie A"): "I1", ("Germany", "Bundesliga"): "D1", ("France", "Ligue 1"): "F1",
+          ("Netherlands", "Eredivisie"): "N1", ("Portugal", "Primeira Liga"): "P1",
+          ("Belgium", "Jupiler Pro League"): "B1", ("Turkey", "Süper Lig"): "T1", ("Scotland", "Premiership"): "SC0"}
+FINAL = {"FT", "AET", "PEN"}
+
+
+def fetch_api_football(today: dt.date, days: int = 2) -> list[dict]:  # noqa: ARG001
+    """Same-night results for every league we cover (1 request per day; free plan = 100 requests/day)."""
+    key = os.environ.get("APISPORTS_KEY")
+    if not key:
+        print("  API-Football: no APISPORTS_KEY set, skipping")
+        return []
+    out = []
+    # free plan only serves yesterday..tomorrow (UTC), so ask for UTC-today and UTC-yesterday
+    utc_today = dt.datetime.now(dt.timezone.utc).date()
+    for i in range(days):
+        d = utc_today - dt.timedelta(days=i)
+        try:
+            req = urllib.request.Request(AF_API.format(d=d.isoformat()), headers={"x-apisports-key": key})
+            with urllib.request.urlopen(req, timeout=30) as r:
+                data = json.loads(r.read().decode("utf-8"))
+        except Exception as e:  # noqa: BLE001
+            print(f"  ! API-Football {d}: {e}", file=sys.stderr)
+            continue
+        if data.get("errors"):
+            print(f"  ! API-Football {d}: {data['errors']}", file=sys.stderr)
+            continue
+        for f in data.get("response", []):
+            lg = f.get("league") or {}
+            code = AF_MAP.get((lg.get("country"), lg.get("name")))
+            g = f.get("goals") or {}
+            if not code or (f.get("fixture") or {}).get("status", {}).get("short") not in FINAL or g.get("home") is None:
+                continue
+            out.append({"league": code, "utc": f["fixture"]["date"][:19],
+                        "home_names": [f["teams"]["home"]["name"]], "away_names": [f["teams"]["away"]["name"]],
+                        "hg": int(g["home"]), "ag": int(g["away"])})
+    return out
