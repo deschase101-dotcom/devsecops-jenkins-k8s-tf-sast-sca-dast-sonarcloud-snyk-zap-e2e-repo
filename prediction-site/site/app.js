@@ -50,7 +50,13 @@
       projections: "Projections", g_total: "Game total", t_total: "team total", margin: "Margin",
       props: "Player props", props_top: "Top player props", props_sub: "Most reliable lines from each player's games this season: projection blended with his real hit rate (12/12 = cleared in each of his last 12 games). No bookmaker lines yet.",
       player: "Player", min: "Min", safe_line: "Safe line", st_pts: "pts", st_trb: "reb", st_ast: "ast", st_fg3: "3PM", st_pra: "PRA",
-      over_short: "Over", proj_short: "Proj.", record_short: "Hit", last5: "Last 5",
+      over_short: "Over", proj_short: "Proj.", record_short: "Hit",
+      tab_lines: "Game lines", tab_props: "Player props", players_n: "players", yes: "Yes", no: "No",
+      c_pts: "Player points", c_ast: "Player assists", c_trb: "Player rebounds", c_fg3: "Player threes",
+      c_stl: "Player steals", c_blk: "Player blocks", c_dd: "Double double", c_td: "Triple double",
+      dd_sub: "Players to record a double double", td_sub: "Players to record a triple double",
+      board_sub: "Chance of each line from ProScore's model (projection blended with the player's real record this season). Tap a category to open it.",
+      did: "did it", of: "of", last5: "Last 5",
     },
     fr: {
       nav_home: "Accueil", nav_today: "Matchs", nav_coupons: "Coupons", nav_record: "Bilan", nav_tables: "Classements",
@@ -98,7 +104,13 @@
       projections: "Projections", g_total: "Total du match", t_total: "total équipe", margin: "Écart",
       props: "Props joueurs", props_top: "Meilleurs props joueurs", props_sub: "Lignes les plus fiables d'après les matchs de la saison : projection mélangée avec son taux de réussite réel (12/12 = dépassée lors de ses 12 derniers matchs). Pas encore de lignes bookmaker.",
       player: "Joueur", min: "Min", safe_line: "Ligne sûre", st_pts: "pts", st_trb: "reb", st_ast: "pd", st_fg3: "3PTS", st_pra: "PRA",
-      over_short: "Plus de", proj_short: "Proj.", record_short: "Réussi", last5: "5 derniers",
+      over_short: "Plus de", proj_short: "Proj.", record_short: "Réussi",
+      tab_lines: "Lignes du match", tab_props: "Props joueurs", players_n: "joueurs", yes: "Oui", no: "Non",
+      c_pts: "Points joueur", c_ast: "Passes joueur", c_trb: "Rebonds joueur", c_fg3: "Paniers à 3 pts",
+      c_stl: "Interceptions", c_blk: "Contres", c_dd: "Double-double", c_td: "Triple-double",
+      dd_sub: "Joueurs qui feront un double-double", td_sub: "Joueurs qui feront un triple-double",
+      board_sub: "Probabilité de chaque ligne selon le modèle ProScore (projection mélangée avec le bilan réel du joueur cette saison). Touchez une catégorie pour l'ouvrir.",
+      did: "réussi", of: "sur", last5: "5 derniers",
     },
   };
   let lang = (() => { try { return localStorage.getItem("ps_lang") || (navigator.language || "en").slice(0, 2); } catch { return "en"; } })();
@@ -216,6 +228,39 @@
     </tbody></table></div>`;
   }
 
+  const short = (name) => name.split(" ").slice(-1)[0];
+  const heat = (p) => `--heat:${Math.round(p * 100)}%`;
+  function marketBoard(m) {
+    const all = [...(m.players.home || []), ...(m.players.away || [])];
+    const abbr = (team) => (team === m.home ? m.home_abbr || short(m.home) : m.away_abbr || short(m.away));
+    const ph = (m.markets.find((x) => x.code === "ML_H") || {}).prob || 0.5;
+    const teamRow = (name, p) => `<div class="mrow">${crest(name)}<span class="mname">${esc(name)}</span>
+      <span class="pill yes">${t("yes")} ${pct(p)}</span><span class="pill no">${t("no")} ${pct(1 - p)}</span></div>`;
+    const cat = (key, rowsHtml, n, sub) => `<details class="acc"${key === "pts" ? " open" : ""}>
+      <summary><span><b>${t("c_" + key)}</b>${sub ? `<small>${sub}</small>` : ""}</span><span class="cnt">${n} ${t("players_n")}</span></summary>
+      <div class="acc-body">${rowsHtml}</div></details>`;
+    const ladderCat = (s) => {
+      const ps = all.filter((p) => p.ladder && p.ladder[s]).sort((a, b) => b.proj[s] - a.proj[s]);
+      if (!ps.length) return "";
+      const rows = ps.map((p) => `<div class="lrow"><div class="lwho"><b>${esc(p.name)}</b><small>${esc(abbr(p.team))} · ${t("proj_short")} ${p.proj[s]}</small></div>
+        <div class="rungs">${p.ladder[s].map((r) => `<span class="rung" style="${heat(r.p)}" title="${r.hit} ${t("of")} ${p.games}"><b>${r.k}+</b>${pct(r.p)}</span>`).join("")}</div></div>`).join("");
+      return cat(s, rows, ps.length);
+    };
+    const multiCat = (key, field, realField) => {
+      const ps = all.filter((p) => p[field] >= 0.03).sort((a, b) => b[field] - a[field]);
+      if (!ps.length) return "";
+      const rows = ps.map((p) => `<div class="lrow"><div class="lwho"><b>${esc(p.name)}</b><small>${esc(abbr(p.team))} · ${t("did")} ${p[realField]} ${t("of")} ${p.games}</small></div>
+        <div class="rungs"><span class="rung" style="${heat(p[field])}"><b>${t("yes")}</b>${pct(p[field])}</span></div></div>`).join("");
+      return cat(key, rows, ps.length, t(key + "_sub"));
+    };
+    return `<div class="board">
+      <div class="board-teams">${teamRow(m.home, ph)}${teamRow(m.away, 1 - ph)}</div>
+      <p class="sub" style="margin:4px 2px 10px">${t("board_sub")}</p>
+      ${["pts", "ast", "trb", "fg3", "stl", "blk"].map(ladderCat).join("")}
+      ${multiCat("dd", "dd", "dd_real")}${multiCat("td", "td", "td_real")}
+    </div>`;
+  }
+
   function sportTabs(counts) {
     const f = (v, label) => `<button class="filter ${state.sport === v ? "on" : ""}" data-f="sport" data-v="${v}">${label}</button>`;
     return `<div class="filters">${f("all", t("s_all"))}${SPORTS.map((s) => f(s, `${SPORT_ICON[s]} ${t("s_" + s)}${counts && counts[s] != null ? ` · ${counts[s]}` : ""}`)).join("")}</div>`;
@@ -284,7 +329,7 @@
       <p class="sub" style="text-align:center;margin-top:24px">${t("updated")}: ${new Date(meta.generated_at).toLocaleString(lang === "fr" ? "fr-FR" : "en-GB")}</p>`;
   }
 
-  const state = { day: "today", league: "all", flag: "all", sport: "all" };
+  const state = { day: "today", league: "all", flag: "all", sport: "all", ptab: "props" };
   function viewToday() {
     const { meta, matches } = DATA.pred;
     const today = meta.date;
@@ -466,7 +511,11 @@
           <span style="display:flex;gap:6px;align-items:center">${tip.value ? `<span class="value">${t("value")}</span>` : ""}<span class="conf ${tip.confidence}">${t("conf_" + tip.confidence)}</span></span>
         </div>
       </div>
-      <section class="panels">
+      ${m.players ? `<div class="mtabs"><button class="mtab ${state.ptab === "lines" ? "on" : ""}" data-f="ptab" data-v="lines">${t("tab_lines")}</button><button class="mtab ${state.ptab === "props" ? "on" : ""}" data-f="ptab" data-v="props">${t("tab_props")}</button></div>` : ""}
+      ${m.players && state.ptab === "props" ? `<section>${marketBoard(m)}
+        ${m.props && m.props.length ? `<div class="section-head" style="margin-top:22px"><h2>${t("props_top")}</h2></div><div class="panel">${propsList(m.props)}</div>` : ""}
+        <div class="panel" style="margin-top:12px">${playersTable(m.home, m.players.home)}${playersTable(m.away, m.players.away)}</div>
+      </section>` : `<section class="panels">
         <div class="panel"><h3>${t("why")}</h3><p class="explain">${why}</p>
           ${m.correct_scores && m.correct_scores.length ? `<h3 style="margin-top:16px">${t("scores")}</h3><div class="scores">${m.correct_scores.map((s) => `<div><b>${esc(s.score)}</b><span>${pct(s.prob, 1)}</span></div>`).join("")}</div>` : ""}
         </div>
@@ -490,11 +539,7 @@
         <div class="panel"><h3>${t("h2h")}</h3>
           ${m.h2h.length ? `<table class="cmp"><tbody>${m.h2h.map((g) => `<tr><td>${fmtDate(g.date, { day: "2-digit", month: "2-digit", year: "2-digit" })}</td><td>${esc(g.home)} – ${esc(g.away)}</td><td class="mono"><b>${esc(g.score)}</b></td></tr>`).join("")}</tbody></table>` : `<p class="sub">${t("no_h2h")}</p>`}
         </div>
-      </section>
-      ${m.players ? `<section><div class="section-head"><div><h2>${t("props")}</h2><div class="sub">${t("props_sub")}</div></div></div>
-        ${m.props && m.props.length ? `<div class="panel" style="margin-bottom:12px">${propsList(m.props)}</div>` : ""}
-        <div class="panel">${playersTable(m.home, m.players.home)}${playersTable(m.away, m.players.away)}</div>
-      </section>` : ""}`;
+      </section>`}`;
   }
 
   // ------------------------------------------------------------------ router

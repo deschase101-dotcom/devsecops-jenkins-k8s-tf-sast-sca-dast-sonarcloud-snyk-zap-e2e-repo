@@ -17,6 +17,7 @@ import datetime as dt
 import html as htmllib
 import math
 import os
+import random
 import re
 import sys
 import time
@@ -25,10 +26,14 @@ from collections import defaultdict
 
 BOX = "https://www.basketball-reference.com/boxscores/{id}.html"
 UA = "Mozilla/5.0 (compatible; ProScoreBot/1.0)"
-STATS = ("pts", "trb", "ast", "fg3")
+STATS = ("pts", "trb", "ast", "fg3", "stl", "blk")
+SAFE_STATS = ("pts", "trb", "ast", "fg3", "pra")
+COUNT_STATS = ("fg3", "stl", "blk")  # small whole numbers -> Poisson
+LADDER = {"pts": [10, 15, 20, 25, 30, 35, 40], "trb": [4, 6, 8, 10, 12, 14], "ast": [2, 4, 6, 8, 10, 12],
+          "fg3": [1, 2, 3, 4, 5, 6], "stl": [1, 2, 3], "blk": [1, 2, 3, 4]}
 HALF_LIFE_GAMES = 6
 SAFE_P = 0.75
-SD_FLOOR = {"pts": 4.0, "trb": 1.8, "ast": 1.5, "fg3": 0.9, "pra": 5.0}
+SD_FLOOR = {"pts": 4.0, "trb": 1.8, "ast": 1.5, "fg3": 0.9, "stl": 0.7, "blk": 0.7, "pra": 5.0}
 
 
 def _phi(x: float) -> float:
@@ -37,7 +42,7 @@ def _phi(x: float) -> float:
 
 def prob_over(stat: str, mu: float, sd: float, line: float, recent: list[float]) -> float:
     """50/50 blend of the model distribution and the player's own recent hit rate (smoothed)."""
-    if stat == "fg3":  # small whole numbers -> Poisson
+    if stat in COUNT_STATS:
         k = int(math.floor(line))
         model = 1 - sum(math.exp(-mu) * mu ** i / math.factorial(i) for i in range(k + 1))
     else:
@@ -151,7 +156,7 @@ def project_team(team: str, opp: str, logs, team_dates, names, opp_def: float, t
             proj[s] = round(mu, 1)
             sd[s] = max(math.sqrt(var), SD_FLOOR[s])
         safe = {}
-        for s in STATS + ("pra",):
+        for s in SAFE_STATS:
             vals = [l["pts"] + l["trb"] + l["ast"] if s == "pra" else l[s] for l in lines]
             if s == "fg3" and proj[s] < 1.2:
                 continue
@@ -165,8 +170,32 @@ def project_team(team: str, opp: str, logs, team_dates, names, opp_def: float, t
                 line -= 1.0
             if best:
                 safe[s] = best
+        # ladder of "X+" lines (like a prediction market): P(stat >= k)
+        ladder = {}
+        for s, ks in LADDER.items():
+            vals = [l[s] for l in lines]
+            rungs = []
+            for k in ks:
+                p = prob_over(s, proj[s], sd[s], k - 0.5, vals)
+                if 0.06 <= p <= 0.97:
+                    rungs.append({"k": k, "p": round(p, 3), "hit": sum(v >= k for v in vals)})
+            if rungs:
+                ladder[s] = rungs
+        # double-double / triple-double: simulation from his distributions, blended with his real record
+        rnd = random.Random(pid)
+        dd_sim = td_sim = 0
+        N = 3000
+        for _ in range(N):
+            tens = sum(rnd.gauss(proj[s], sd[s]) >= 9.5 for s in ("pts", "trb", "ast", "stl", "blk"))
+            dd_sim += tens >= 2
+            td_sim += tens >= 3
+        tens_real = [sum(l[s] >= 10 for s in ("pts", "trb", "ast", "stl", "blk")) for l in lines]
+        dd = 0.5 * dd_sim / N + 0.5 * (sum(t >= 2 for t in tens_real) + 0.5) / (len(lines) + 1)
+        td = 0.5 * td_sim / N + 0.5 * (sum(t >= 3 for t in tens_real) + 0.1) / (len(lines) + 1)
         out.append({"id": pid, "name": names.get(pid, pid), "team": team, "opp": opp, "min": round(mins, 1),
                     "games": len(lines), "proj": proj, "sd": {k: round(v, 1) for k, v in sd.items()}, "safe": safe,
+                    "ladder": ladder, "dd": round(dd, 3), "td": round(td, 3),
+                    "dd_real": sum(t >= 2 for t in tens_real), "td_real": sum(t >= 3 for t in tens_real),
                     "last5": [{k: l[k] for k in ("pts", "trb", "ast", "fg3")} for l in lines[-5:]]})
     out.sort(key=lambda p: -p["min"])
     return out[:top]
