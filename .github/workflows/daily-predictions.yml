@@ -4,6 +4,7 @@ on:
   schedule:
     - cron: "17 11 * * *"  # 06:17 US Eastern: new day's football, NBA and NHL slate
     - cron: "47 21 * * *"  # 16:47 US Eastern: refresh before NBA/NHL tip-off (latest absences)
+    - cron: "17 23 * * *"  # 18:17 US Eastern: last refresh with the newest injury report before 7 pm games
   workflow_dispatch:
   push:
     branches: [main]
@@ -37,6 +38,9 @@ jobs:
           path: prediction-site/.cache
           key: data-cache-${{ github.run_id }}
           restore-keys: data-cache-
+
+      - name: Install PDF reader (official NBA injury report)
+        run: pip install pypdf
 
       - name: Download results, fit model, predict, settle tips, backtest
         working-directory: prediction-site

@@ -60,7 +60,7 @@
       yesterday: "Yesterday", final: "Final", live_now: "LIVE", yesterday_sub: "Yesterday's published tips and how they finished.",
       no_yesterday: "No settled tips for yesterday yet. Results are added on the next update.",
       c_game: "Game total points", c_team: "Team total points", lines_n: "lines",
-      out_title: "Probably out", out_sub: "Missed the team's last two games (no official injury report is used). The projection is lowered for this.",
+      out_title: "Lineup news", out_sub: "From the official NBA injury report (Out / Doubtful count fully, Questionable half). Players marked \"missed last 2 games\" are a ProScore estimate. The projection is lowered for these absences.",
       ppg: "pts/game", lineup_adj: "lineup-adjusted from", last5: "Last 5",
     },
     fr: {
@@ -119,7 +119,7 @@
       yesterday: "Hier", final: "Terminé", live_now: "EN DIRECT", yesterday_sub: "Les pronos publiés hier et leur résultat.",
       no_yesterday: "Pas encore de pronos validés pour hier. Les résultats sont ajoutés à la prochaine mise à jour.",
       c_game: "Total de points du match", c_team: "Total de points par équipe", lines_n: "lignes",
-      out_title: "Probablement absents", out_sub: "Absents lors des deux derniers matchs de l'équipe (pas de rapport officiel des blessures). La projection est réduite en conséquence.",
+      out_title: "Infos effectif", out_sub: "D'après le rapport officiel des blessures de la NBA (Out / Doubtful comptent entièrement, Questionable à moitié). « Missed last 2 games » est une estimation ProScore. La projection est réduite en conséquence.",
       ppg: "pts/match", lineup_adj: "ajusté selon l'effectif, base", last5: "5 derniers",
     },
   };
@@ -265,7 +265,7 @@
     if (!ps || !ps.length) return "";
     const cell = (p, s) => p.safe[s] ? `<b>${p.proj[s]}</b><div class="sub">${t("over_short")} ${p.safe[s].line} · ${pct(p.safe[s].prob)}</div>` : `<b>${p.proj[s]}</b>`;
     return `<h3 style="margin:14px 0 8px">${esc(team)}</h3><div class="table-wrap"><table class="std" style="min-width:560px"><thead><tr><th>${t("player")}</th><th>${t("min")}</th><th>PTS</th><th>REB</th><th>AST</th><th>3PM</th><th>PRA</th></tr></thead><tbody>
-      ${ps.map((p) => `<tr><td><b>${esc(p.name)}</b><div class="sub">${t("last5")}: ${p.last5.map((l) => l.pts).join(" · ")} pts</div></td><td>${p.min}</td><td>${cell(p, "pts")}</td><td>${cell(p, "trb")}</td><td>${cell(p, "ast")}</td><td>${cell(p, "fg3")}</td><td>${cell(p, "pra")}</td></tr>`).join("")}
+      ${ps.map((p) => `<tr><td><b>${esc(p.name)}</b>${p.status ? ` <span class="inj inj-questionable">Q</span>` : ""}<div class="sub">${t("last5")}: ${p.last5.map((l) => l.pts).join(" · ")} pts</div></td><td>${p.min}</td><td>${cell(p, "pts")}</td><td>${cell(p, "trb")}</td><td>${cell(p, "ast")}</td><td>${cell(p, "fg3")}</td><td>${cell(p, "pra")}</td></tr>`).join("")}
     </tbody></table></div>`;
   }
 
@@ -303,7 +303,7 @@
         <div class="acc-body">${totRow(m.home, `${t("proj_short")} ${m.xg[0].toFixed(1)}`, tot.home)}${totRow(m.away, `${t("proj_short")} ${m.xg[1].toFixed(1)}`, tot.away)}</div></details>` : "";
     const miss = m.missing ? [...m.missing.home.map((x) => ({ ...x, team: m.home })), ...m.missing.away.map((x) => ({ ...x, team: m.away }))] : [];
     const missing = miss.length ? `<div class="panel out"><b>⚠️ ${t("out_title")}</b>
-        <ul>${miss.map((x) => `<li><b>${esc(x.name)}</b> <span class="sub">${esc(abbr(x.team))} · ${x.pts} ${t("ppg")} · ${x.min} min</span></li>`).join("")}</ul>
+        <ul>${miss.map((x) => `<li><b>${esc(x.name)}</b> <span class="inj inj-${esc((x.status || "").split(" ")[0].toLowerCase())}">${esc(x.status || "")}</span> <span class="sub">${esc(abbr(x.team))} · ${x.pts} ${t("ppg")} · ${x.min} min${x.reason ? " · " + esc(x.reason) : ""}</span></li>`).join("")}</ul>
         <small class="sub">${t("out_sub")}${m.xg_base ? ` (${t("lineup_adj")} ${m.xg_base[0].toFixed(1)} – ${m.xg_base[1].toFixed(1)})` : ""}</small></div>` : "";
     return `<div class="board">
       <div class="board-teams">${teamRow(m.home, ph)}${teamRow(m.away, 1 - ph)}</div>

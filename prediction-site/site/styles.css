@@ -249,3 +249,8 @@ table.std td b { font-family: "JetBrains Mono", monospace; }
 .badge.lost { background: rgba(248,113,113,.15); color: var(--lose); }
 .badge.live { background: rgba(248,113,113,.15); color: var(--lose); animation: pulse 1.6s infinite; }
 .vs b.final { font-size: 18px; color: var(--accent-2); }
+
+.inj { font: 700 10px "JetBrains Mono", monospace; padding: 2px 6px; border-radius: 6px; text-transform: uppercase; letter-spacing: .4px; }
+.inj-out, .inj-doubtful { background: rgba(248,113,113,.18); color: var(--lose); }
+.inj-questionable { background: rgba(251,191,36,.18); color: var(--draw); }
+.inj-missed { background: rgba(148,163,184,.18); color: var(--muted); }

@@ -537,22 +537,28 @@ def run_team_sport(key: str, today: dt.date, cache_dir: str) -> tuple:
             cs = [g for g in games if g.get("season") == cur]
             boxes = nba_props.fetch_boxes(cs, cache_dir)
             logs, team_dates, names = nba_props.build_logs(cs, boxes)
+            try:
+                import nba_injuries
+                injuries = nba_injuries.fetch(today)
+            except Exception as e:  # noqa: BLE001
+                print(f"  ! NBA injury report failed: {e}", file=sys.stderr)
+                injuries = {}
             for m in preds:
                 if dt.date.fromisoformat(m["date"]) > today + dt.timedelta(days=1):
                     # games further out: totals ladder only (lineups/props are only meaningful close to tip-off)
                     m["totals"] = nba_props.totals_ladder(*m["xg"])
                     continue
-                hp = nba_props.project_team(m["home"], m["away"], logs, team_dates, names, R.dfn.get(m["away"], 1.0))
-                ap = nba_props.project_team(m["away"], m["home"], logs, team_dates, names, R.dfn.get(m["home"], 1.0))
+                hp = nba_props.project_team(m["home"], m["away"], logs, team_dates, names, R.dfn.get(m["away"], 1.0), injuries=injuries)
+                ap = nba_props.project_team(m["away"], m["home"], logs, team_dates, names, R.dfn.get(m["home"], 1.0), injuries=injuries)
                 m["players"] = {"home": hp, "away": ap}
                 m["props"] = nba_props.best_props(hp + ap, m["home"], m["away"])
                 # lineup adjustment: a team missing regular scorers loses ~30% of their points (capped at 8);
                 # team-mates absorb the rest, and the ratings already include part of the absence
-                mh = nba_props.missing_players(m["home"], logs, team_dates, names)
-                ma = nba_props.missing_players(m["away"], logs, team_dates, names)
+                mh = nba_props.missing_players(m["home"], logs, team_dates, names, injuries=injuries)
+                ma = nba_props.missing_players(m["away"], logs, team_dates, names, injuries=injuries)
                 eh, ea = m["xg"]
-                eh_adj = eh - min(8.0, 0.3 * sum(x["pts"] for x in mh))
-                ea_adj = ea - min(8.0, 0.3 * sum(x["pts"] for x in ma))
+                eh_adj = eh - min(8.0, 0.3 * sum(x["pts"] * x["weight"] for x in mh))
+                ea_adj = ea - min(8.0, 0.3 * sum(x["pts"] * x["weight"] for x in ma))
                 m["missing"] = {"home": mh, "away": ma}
                 m["xg_base"] = [eh, ea]
                 m["xg"] = [round(eh_adj, 1), round(ea_adj, 1)]
