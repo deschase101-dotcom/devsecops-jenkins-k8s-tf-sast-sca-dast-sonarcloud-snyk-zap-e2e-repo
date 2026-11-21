@@ -608,6 +608,29 @@
       </section>`}`;
   }
 
+  // Results already graded in the track record are shown on match cards and coupons too,
+  // whichever source supplied the score (so a finished game never stays "pending" on the page).
+  function applySettled() {
+    const tips = (DATA.history && DATA.history.tips) || {};
+    const hc = (DATA.history && DATA.history.coupons) || {};
+    for (const m of DATA.pred.matches || []) {
+      const t = tips[m.id];
+      if (!m.result && t && t.status !== "pending" && t.score) {
+        const sc = String(t.score).split("-").map(Number);
+        if (sc.length === 2 && sc.every((x) => !isNaN(x))) { m.result = sc; m.live = false; }
+      }
+    }
+    for (const c of DATA.pred.coupons || []) {
+      const h = hc[c.id];
+      for (const p of c.picks) {
+        const t = tips[p.id];
+        if (t && t.status !== "pending") { p.status = t.status; p.score = t.score; }
+      }
+      const st = c.picks.map((p) => p.status || "pending");
+      c.status = h && h.status !== "pending" ? h.status : st.includes("lost") ? "lost" : st.every((x) => x === "won") ? "won" : "pending";
+    }
+  }
+
   // ------------------------------------------------------------------ router
   function render() {
     const route = location.hash.replace(/^#\/?/, "");
@@ -651,6 +674,7 @@
     [DATA.pred, DATA.history, DATA.tables, DATA.results, DATA.backtest] = await Promise.all([
       load("predictions", empty), load("history", {}), load("tables", {}), load("results", []), load("backtest", null),
     ]);
+    applySettled();
     render();
   })();
 })();
