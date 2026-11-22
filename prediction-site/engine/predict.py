@@ -243,6 +243,18 @@ class LeagueModel:
 
     def _fit(self, iters: int = 40) -> None:
         w = [math.exp(-XI * (self.ref - m["date"]).days) for m in self.matches]
+        # this season (from July) carries most of the weight: squads change a lot between seasons
+        cur_start = dt.date(self.ref.year if self.ref.month >= 7 else self.ref.year - 1, 7, 1)
+        cur = sum(wi for wi, m in zip(w, self.matches) if m["date"] >= cur_start)
+        old = sum(wi for wi, m in zip(w, self.matches) if m["date"] < cur_start)
+        if cur > 0 and old > 0:
+            # sliding weight: ~50% at the start of the season, 95% by mid-season (about 19 games)
+            cur_m = [m for m in self.matches if m["date"] >= cur_start]
+            teams = {m["home"] for m in cur_m} | {m["away"] for m in cur_m}
+            gpt = 2 * len(cur_m) / max(1, len(teams))
+            share = min(0.95, 0.5 + 0.45 * gpt / 19)
+            k = (1 - share) / share * cur / old
+            w = [wi if m["date"] >= cur_start else wi * k for wi, m in zip(w, self.matches)]
         sw = sum(w)
         self.base = sum(wi * (m["hg"] + m["ag"]) for wi, m in zip(w, self.matches)) / (2 * sw)
         hg = sum(wi * m["hg"] for wi, m in zip(w, self.matches))
