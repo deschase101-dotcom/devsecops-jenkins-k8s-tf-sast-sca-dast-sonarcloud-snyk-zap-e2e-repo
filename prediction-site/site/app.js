@@ -21,7 +21,8 @@
       no_matches: "No predictions for this filter yet. New fixtures are analysed every morning.",
       tip: "Tip", fair: "fair", value: "VALUE", conf_high: "High", conf_medium: "Medium", conf_low: "Low",
       coupon: "Accumulator", events: "Events", total_odds: "Total odds", model_prob: "Model probability", status: "Status",
-      k_safe: "Safe", k_value: "Value", k_mega: "Mega",
+      k_safe: "Safe", k_value: "Value", k_mega: "Mega", k_odds3: "3 odds", k_ultra: "Ultra",
+      win60: "win (60 min)", tie60: "Tie after 60 min (goes to OT)", or_tie60: "or tie (60 min)", no_tie60: "No tie after 60 min",
       pending: "Pending", won: "Won", lost: "Lost",
       record: "Track record", record_sub: "Every published tip, settled against the final score.",
       overall: "All time", last30: "Last 30 days", tips: "tips", hit: "hit-rate", roi: "ROI (1 unit flat)",
@@ -42,7 +43,7 @@
       "m_U1.5": "Under 1.5 goals", "m_U2.5": "Under 2.5 goals", "m_U3.5": "Under 3.5 goals",
       m_BTTS: "Both teams score", m_NO_BTTS: "Not both score", m_H_SCORES: "Home scores", m_A_SCORES: "Away scores",
       m_ML_H: "Home win", m_ML_A: "Away win", m_SP_H: "Home spread", m_SP_A: "Away spread", m_OV: "Over", m_UN: "Under",
-      s_all: "All sports", s_soccer: "Football", s_basketball: "Basketball", s_hockey: "Ice hockey", s_tennis: "Tennis",
+      s_all: "All sports", s_mixed: "Multi-sport", s_soccer: "Football", s_basketball: "Basketball", s_hockey: "Ice hockey", s_tennis: "Tennis",
       win: "to win", over: "Over", under: "Under", proj: "Projected", elo: "Elo rating", points: "pts", goals: "goals",
       pf: "Scored / game", pa: "Conceded / game", winr: "Win rate", overr: "Over the line", played: "Matches rated",
       model: "Model", market_p: "Market", book: "Odds", by_sport: "By sport", sport: "Sport",
@@ -80,7 +81,8 @@
       no_matches: "Aucun pronostic pour ce filtre. Les nouveaux matchs sont analysés chaque matin.",
       tip: "Prono", fair: "juste", value: "VALUE", conf_high: "Haute", conf_medium: "Moyenne", conf_low: "Faible",
       coupon: "Combiné", events: "Événements", total_odds: "Cote totale", model_prob: "Probabilité modèle", status: "Statut",
-      k_safe: "Sûr", k_value: "Value", k_mega: "Méga",
+      k_safe: "Sûr", k_value: "Value", k_mega: "Méga", k_odds3: "Cote 3", k_ultra: "Ultra",
+      win60: "gagne (60 min)", tie60: "Égalité après 60 min (prolongation)", or_tie60: "ou égalité (60 min)", no_tie60: "Pas d'égalité après 60 min",
       pending: "En attente", won: "Gagné", lost: "Perdu",
       record: "Bilan", record_sub: "Chaque prono publié, validé avec le score final.",
       overall: "Depuis le début", last30: "30 derniers jours", tips: "pronos", hit: "réussite", roi: "ROI (mise fixe)",
@@ -101,7 +103,7 @@
       "m_U1.5": "Moins de 1,5 buts", "m_U2.5": "Moins de 2,5 buts", "m_U3.5": "Moins de 3,5 buts",
       m_BTTS: "Les deux marquent", m_NO_BTTS: "Pas les deux", m_H_SCORES: "Domicile marque", m_A_SCORES: "Extérieur marque",
       m_ML_H: "Victoire domicile", m_ML_A: "Victoire extérieur", m_SP_H: "Handicap domicile", m_SP_A: "Handicap extérieur", m_OV: "Plus de", m_UN: "Moins de",
-      s_all: "Tous les sports", s_soccer: "Football", s_basketball: "Basket", s_hockey: "Hockey sur glace", s_tennis: "Tennis",
+      s_all: "Tous les sports", s_mixed: "Multi-sports", s_soccer: "Football", s_basketball: "Basket", s_hockey: "Hockey sur glace", s_tennis: "Tennis",
       win: "gagne", over: "Plus de", under: "Moins de", proj: "Projection", elo: "Classement Elo", points: "pts", goals: "buts",
       pf: "Marqués / match", pa: "Encaissés / match", winr: "Victoires", overr: "Au-dessus de la ligne", played: "Matchs notés",
       model: "Modèle", market_p: "Marché", book: "Cote", by_sport: "Par sport", sport: "Sport",
@@ -137,11 +139,17 @@
       case "SP_A": return `${away} ${signed(line)}`;
       case "OV": return `${t("over")} ${line}`;
       case "UN": return `${t("under")} ${line}`;
+      case "R1": return `${home} ${t("win60")}`;
+      case "R2": return `${away} ${t("win60")}`;
+      case "RX": return t("tie60");
+      case "DC_1X": return `${home} ${t("or_tie60")}`;
+      case "DC_X2": return `${away} ${t("or_tie60")}`;
+      case "DC_12": return t("no_tie60");
       default: return mk(code);
     }
   }
   const SPORTS = ["soccer", "basketball", "hockey", "tennis"];
-  const SPORT_ICON = { soccer: "⚽", basketball: "🏀", hockey: "🏒", tennis: "🎾" };
+  const SPORT_ICON = { soccer: "⚽", basketball: "🏀", hockey: "🏒", tennis: "🎾", mixed: "🎯" };
   const sportOf = (m) => m.sport || "soccer";
 
   // ------------------------------------------------------------------ utils
@@ -197,8 +205,13 @@
     return { ph, pa: 1 - ph };
   }
   // did the tip win, given a final score [home, away]?
-  function tipWon(market, line, h, a) {
+  function tipWon(market, line, h, a, ot) {
     const tot = h + a;
+    if (["R1", "RX", "R2", "DC_1X", "DC_X2", "DC_12"].includes(market)) {
+      if (ot == null) return null;
+      const hr = h > a && !ot, ar = a > h && !ot;
+      return { R1: hr, RX: !!ot, R2: ar, DC_1X: !ar, DC_X2: !hr, DC_12: !ot }[market];
+    }
     switch (market) {
       case "1": case "ML_H": return h > a;
       case "2": case "ML_A": return a > h;
@@ -221,14 +234,14 @@
   }
   function resultBadge(m) {
     if (m.result) {
-      const w = tipWon(m.tip.market, m.tip.line, m.result[0], m.result[1]);
+      const w = tipWon(m.tip.market, m.tip.line, m.result[0], m.result[1], sportOf(m) === "hockey" ? !!m.ot : undefined);
       return w == null ? "" : `<span class="badge ${w ? "won" : "lost"}">${w ? "✅ " + t("won") : "❌ " + t("lost")}</span>`;
     }
     return m.live ? `<span class="badge live">● ${t("live_now")}</span>` : "";
   }
   function centerInfo(m) {
     const sp = sportOf(m);
-    if (m.result) return `${t("final")}<b class="final">${m.result[0]} – ${m.result[1]}</b>`;
+    if (m.result) return `${t("final")}${m.ot ? " (OT)" : ""}<b class="final">${m.result[0]} – ${m.result[1]}</b>`;
     if (sp === "tennis") return `${t("elo")}<b>${m.elo[0]} – ${m.elo[1]}</b>`;
     const d = sp === "basketball" ? 0 : 1;
     return `${t("proj")}<b>${m.xg[0].toFixed(d)} – ${m.xg[1].toFixed(d)}</b>`;
@@ -628,8 +641,8 @@
     for (const m of DATA.pred.matches || []) {
       const t = tips[m.id];
       if (!m.result && t && t.status !== "pending" && t.score) {
-        const sc = String(t.score).split("-").map(Number);
-        if (sc.length === 2 && sc.every((x) => !isNaN(x))) { m.result = sc; m.live = false; }
+        const sc = String(t.score).replace(" (OT)", "").split("-").map(Number);
+        if (sc.length === 2 && sc.every((x) => !isNaN(x))) { m.result = sc; m.live = false; m.ot = String(t.score).includes("(OT)"); }
       }
     }
     for (const c of DATA.pred.coupons || []) {
@@ -637,8 +650,8 @@
       for (const p of c.picks) {
         const t = tips[p.id];
         if (t && t.status !== "pending" && t.score) {  // grade the leg on its own market
-          const sc = String(t.score).split("-").map(Number);
-          const w = tipWon(p.market, p.line, sc[0], sc[1]);
+          const sc = String(t.score).replace(" (OT)", "").split("-").map(Number);
+          const w = tipWon(p.market, p.line, sc[0], sc[1], p.sport === "hockey" ? String(t.score).includes("(OT)") : undefined);
           p.score = t.score;
           p.status = w == null ? t.status : w ? "won" : "lost";
         }

@@ -415,11 +415,76 @@ def nba_markets(mh: float, ma: float, odds: dict) -> list[dict]:
     return out
 
 
-def nhl_markets(lh: float, la: float, odds: dict) -> tuple[list[dict], list[dict]]:
+TOTAL_LINES = (2.5, 3.5, 4.5, 5.5, 6.5)
+
+
+def _logit(p: float) -> float:
+    p = min(max(p, 1e-4), 1 - 1e-4)
+    return math.log(p / (1 - p))
+
+
+def _sigmoid(x: float) -> float:
+    return 1 / (1 + math.exp(-x))
+
+
+def nhl_calibration(games: list[dict], R: "Ratings", ref: dt.date) -> dict:
+    """Calibrate the hockey goal model on this season's finished games (before `ref`):
+      * scale  - multiplies expected goals so the model's average matches the real average
+      * tie_k  - inflates 'tied after 60 min' cells (independent Poisson under-counts close games)
+      * shift  - per totals line / tie: logit correction so model averages match this season's real rates
+    Everything is shrunk towards 'no correction' when few games are available."""
+    cal = {"scale": 1.0, "tie_k": 1.0, "shift": {}}
+    cur = [g for g in games if g.get("final") and "hr" in g and season_start(ref) <= g["date"] < ref
+           and R.can(g["home"], g["away"], 1)]
+    if len(cur) < 40:
+        return cal
+    w = len(cur) / (len(cur) + 150)
+    exp_tot = sum(sum(R.expect(g["home"], g["away"])) for g in cur) / len(cur)
+    real_tot = sum(g["hr"] + g["ar"] for g in cur) / len(cur)
+    cal["scale"] = round(1 + w * (real_tot / exp_tot - 1), 4)
+    t_model = 0.0
+    for g in cur:
+        lh, la = (x * cal["scale"] for x in R.expect(g["home"], g["away"]))
+        t_model += sum(pois(i, lh) * pois(i, la) for i in range(12))
+    t_model /= len(cur)
+    t_real = sum(1 for g in cur if g["hr"] == g["ar"]) / len(cur)
+    k = t_real * (1 - t_model) / max(1e-6, t_model * (1 - t_real))
+    cal["tie_k"] = round(1 + w * (k - 1), 4)
+    # residual per-line correction
+    sums = {L: 0.0 for L in TOTAL_LINES}
+    hits = {L: 0 for L in TOTAL_LINES}
+    tie_sum = 0.0
+    for g in cur:
+        mk, _ = nhl_markets(*R.expect(g["home"], g["away"]), {}, cal=dict(cal, shift={}))
+        P = {(m["code"], m["line"]): m["model_prob"] for m in mk}
+        tot = g["hs"] + g["as"]
+        for L in TOTAL_LINES:
+            sums[L] += P[("OV", L)]
+            hits[L] += tot > L
+        tie_sum += P[("RX", None)]
+    n = len(cur)
+    for L in TOTAL_LINES:
+        real = (hits[L] + 0.5) / (n + 1)
+        cal["shift"][L] = round(w * (_logit(real) - _logit(sums[L] / n)), 4)
+    cal["shift"]["tie"] = round(w * (_logit((sum(1 for g in cur if g["hr"] == g["ar"]) + 0.5) / (n + 1)) - _logit(tie_sum / n)), 4)
+    return cal
+
+
+def nhl_markets(lh: float, la: float, odds: dict, cal: dict | None = None) -> tuple[list[dict], list[dict]]:
+    cal = cal or {}
+    shift = cal.get("shift", {})
     N = 12
-    M = [[pois(i, lh) * pois(j, la) for j in range(N)] for i in range(N)]
+    lh, la = lh * cal.get("scale", 1.0), la * cal.get("scale", 1.0)
+    tie_k = cal.get("tie_k", 1.0)
+    M = [[pois(i, lh) * pois(j, la) * (tie_k if i == j else 1.0) for j in range(N)] for i in range(N)]
+    tot_m = sum(map(sum, M))
+    M = [[x / tot_m for x in row] for row in M]
     p_reg_h = sum(M[i][j] for i in range(N) for j in range(N) if i > j)
     p_tie = sum(M[i][i] for i in range(N))
+    if "tie" in shift:  # calibrated tie rate; the regulation-win split keeps its ratio
+        new_tie = _sigmoid(_logit(p_tie) + shift["tie"])
+        p_reg_h = p_reg_h * (1 - new_tie) / max(1e-9, 1 - p_tie)
+        p_tie = new_tie
     ot_home = 0.52
     ph = p_reg_h + p_tie * ot_home
     out = []
@@ -439,10 +504,29 @@ def nhl_markets(lh: float, la: float, odds: dict) -> tuple[list[dict], list[dict
     out.append(_mkt("SP_H", L, p, mk[0] if mk else None, odds.get("sp_h")))
     out.append(_mkt("SP_A", -L, 1 - p, mk[1] if mk else None, odds.get("sp_a")))
     T = odds.get("total") or 6.5
-    p_over = sum(M[i][j] for i in range(N) for j in range(N) if (i + j + (1 if i == j else 0)) > T)
+    def over(L: float) -> float:
+        po_ = sum(M[i][j] for i in range(N) for j in range(N) if (i + j + (1 if i == j else 0)) > L)
+        return _sigmoid(_logit(po_) + shift[L]) if L in shift else po_
+    p_over = over(T)
     mk = no_vig(odds.get("ov"), odds.get("un"))
     out.append(_mkt("OV", T, p_over, mk[0] if mk else None, odds.get("ov")))
     out.append(_mkt("UN", T, 1 - p_over, mk[1] if mk else None, odds.get("un")))
+    # 60-minute (regulation) result and double chance: "X" = tied after 60 minutes (game goes to OT/SO)
+    p_reg_a = max(0.0, 1 - p_reg_h - p_tie)
+    for code, p in (("R1", p_reg_h), ("RX", p_tie), ("R2", p_reg_a), ("DC_1X", p_reg_h + p_tie),
+                    ("DC_X2", p_tie + p_reg_a), ("DC_12", p_reg_h + p_reg_a)):
+        out.append(_mkt(code, None, p, None, None))
+    # more totals (final score, OT/shootout winner counts as one goal)
+    for T2 in (2.5, 3.5, 4.5, 5.5):
+        if T2 == T:
+            continue
+        po = over(T2)
+        m_o = _mkt("OV", T2, po, None, None)
+        if T2 == 2.5:
+            m_o["minor"] = True  # ~97% of games: too obvious to be a tip, still shown
+        out.append(m_o)
+        if T2 >= 4.5:
+            out.append(_mkt("UN", T2, 1 - po, None, None))
     scores = sorted(((M[i][j], f"{i}-{j}") for i in range(7) for j in range(7)), reverse=True)[:5]
     return out, [{"score": s, "prob": round(p, 4)} for p, s in scores]
 
@@ -461,7 +545,7 @@ def choose(markets: list[dict]) -> dict:
     if value:
         best = max(value, key=lambda m: m["edge"] * m["prob"])
     else:  # never tip a price the model says is clearly bad (edge below -3%)
-        ok = [m for m in markets if m["edge"] is None or m["edge"] >= -0.03] or markets
+        ok = [m for m in markets if (m["edge"] is None or m["edge"] >= -0.03) and not m.get("minor")] or markets
         best = max(ok, key=lambda m: (m["prob"], m["code"].startswith("ML")))
     conf = "high" if best["prob"] >= 0.72 else "medium" if best["prob"] >= 0.58 else "low"
     return {"market": best["code"], "line": best["line"], "prob": best["prob"],
@@ -522,6 +606,8 @@ def run_team_sport(key: str, today: dt.date, cache_dir: str) -> tuple:
         R = Ratings(games, today, "hs", "as", half_life=90)
     else:
         R = Ratings(games, today, "hr", "ar", half_life=150)
+        nhl_cal = nhl_calibration(games, R, today)
+        print(f"  NHL calibration: {nhl_cal}")
     preds = []
     for g in games:
         # today's games stay listed all day: upcoming, live, or finished (then shown with the result)
@@ -536,7 +622,7 @@ def run_team_sport(key: str, today: dt.date, cache_dir: str) -> tuple:
         if key == "nba":
             mkts = nba_markets(eh, ea, g["odds"])
         else:
-            mkts, scores = nhl_markets(eh, ea, g["odds"])
+            mkts, scores = nhl_markets(eh, ea, g["odds"], cal=nhl_cal)
         tip = choose(mkts)
         tl = g["odds"].get("total")
         preds.append({
@@ -544,6 +630,7 @@ def run_team_sport(key: str, today: dt.date, cache_dir: str) -> tuple:
             "league_name": cfg["name"], "date": g["date"].isoformat(), "time": g.get("time_local") or ((g["kickoff"][11:16] + " UTC") if g["kickoff"] else ""),
             "kickoff": g["kickoff"], "home": g["home"], "away": g["away"],
             "result": [g["hs"], g["as"]] if g["final"] else None, "live": bool(g.get("live")),
+            "ot": bool(g["final"] and "hr" in g and g["hr"] == g["ar"]),
             "home_abbr": g["home_abbr"], "away_abbr": g["away_abbr"],
             "xg": [round(eh, 1 if key == "nba" else 2), round(ea, 1 if key == "nba" else 2)],
             "markets": mkts, "tip": tip, "odds": g["odds"], "correct_scores": scores,
@@ -591,7 +678,9 @@ def run_team_sport(key: str, today: dt.date, cache_dir: str) -> tuple:
                 m["totals"] = nba_props.totals_ladder(eh_adj, ea_adj)
         except Exception as e:  # noqa: BLE001  props are optional
             print(f"  ! NBA player props failed: {e}", file=sys.stderr)
-    finished = {f"{key}|{g['id']}": (g["hs"], g["as"]) for g in finals}
+    # hockey: third value = 1 if the game was tied after 60 minutes (needed to grade 60-min / double-chance tips)
+    finished = {f"{key}|{g['id']}": ((g["hs"], g["as"], int(g.get("hr") == g.get("ar")))
+                                     if key == "nhl" and "hr" in g else (g["hs"], g["as"])) for g in finals}
     recent = [{"league": key.upper(), "league_name": cfg["name"], "sport": cfg["sport"], "date": g["date"].isoformat(),
                "home": g["home"], "away": g["away"], "score": f'{g["hs"]}-{g["as"]}'}
               for g in finals if (today - g["date"]).days <= 3]
@@ -613,7 +702,7 @@ def backtest_team(games: list[dict], key: str, today: dt.date) -> dict:
                 if key == "nba":
                     ph = phi((eh - ea) / 12.0)
                 else:
-                    ph = nhl_markets(eh, ea, {})[0][0]["model_prob"]
+                    ph = nhl_markets(eh, ea, {}, cal=nhl_calibration(games, R, d))[0][0]["model_prob"]
                 won = g["hs"] > g["as"]
                 n += 1; c += (ph >= 0.5) == won
                 brier += (ph - won) ** 2
