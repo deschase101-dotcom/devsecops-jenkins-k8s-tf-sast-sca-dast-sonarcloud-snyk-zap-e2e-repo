@@ -295,6 +295,23 @@ def parse_team_games(days: dict[dt.date, dict], key: str) -> list[dict]:
     return games
 
 
+def current_share(games_per_team: float, half_season: float) -> float:
+    """Weight of this season's games: ~50% at the start, rising to 95% by mid-season.
+    Early on, a team's few games are too noisy to trust alone; as the sample grows (and new rosters
+    settle), the current season takes over."""
+    return min(0.95, 0.5 + 0.45 * games_per_team / half_season)
+
+
+def season_weighted(weights: list[float], dates: list, cur_start: dt.date, share: float) -> list[float]:
+    """Rescale earlier-season weights so they make up only (1 - share) of the total."""
+    cur = sum(w for w, d in zip(weights, dates) if d >= cur_start)
+    old = sum(w for w, d in zip(weights, dates) if d < cur_start)
+    if cur <= 0 or old <= 0:
+        return weights
+    k = (1 - share) / share * cur / old
+    return [w if d >= cur_start else w * k for w, d in zip(weights, dates)]
+
+
 class Ratings:
     """Multiplicative attack/defence ratings fitted by weighted Poisson likelihood (works for goals or points)."""
 
@@ -314,6 +331,12 @@ class Ratings:
             return
         self.ok = True
         w = [math.exp(-xi * (ref - g["date"]).days) for g in self.games]
+        cur_start = season_start(ref)
+        cur_games = [g for g in self.games if g["date"] >= cur_start]
+        cur_teams = {g["home"] for g in cur_games} | {g["away"] for g in cur_games}
+        gpt = 2 * len(cur_games) / max(1, len(cur_teams))  # games played per team this season
+        self.current_share = current_share(gpt, half_season=41)  # NBA/NHL: 82-game seasons
+        w = season_weighted(w, [g["date"] for g in self.games], cur_start, self.current_share)
         sw = sum(w)
         H = sum(wi * g[hk] for wi, g in zip(w, self.games))
         A = sum(wi * g[ak] for wi, g in zip(w, self.games))
