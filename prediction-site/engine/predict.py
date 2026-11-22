@@ -474,23 +474,106 @@ SAFE_MIN = 0.75
 SAFE_SOCCER_MARKETS = ["1X", "X2", "12", "O1.5", "U3.5", "1", "2"]
 
 
+def match_markets(m: dict, sport: str) -> list[dict]:
+    """All usable markets of a match as legs: {market, line, prob, book_odds}. Skips 'minor' markets
+    (e.g. hockey over 2.5, ~97%) that bookmakers price too short to be worth a coupon leg."""
+    if sport == "soccer":
+        t = m["tip"]
+        return [{"market": k, "line": None, "prob": m["probs"][k],
+                 "book_odds": t["book_odds"] if t["market"] == k else None}
+                for k in SAFE_SOCCER_MARKETS + ["O2.5", "U2.5", "BTTS", "NO_BTTS", "X"]]
+    return [{"market": x["code"], "line": x.get("line"), "prob": x["prob"], "book_odds": x.get("odds")}
+            for x in m["markets"] if not x.get("minor")]
+
+
+def leg(m: dict, sport: str, mk: dict) -> dict:
+    return {"id": m["id"], "league": m["league"], "league_name": m["league_name"], "country": m["country"],
+            "date": m["date"], "time": m["time"], "home": m["home"], "away": m["away"], "sport": sport,
+            "market": mk["market"], "line": mk["line"], "prob": round(mk["prob"], 4),
+            "odds": mk["book_odds"] or round(1 / max(mk["prob"], 1e-6), 2)}
+
+
 def safe_pick(m: dict, sport: str) -> dict | None:
     """The single most likely market of a match (a 'banker' leg), if it is at least SAFE_MIN."""
     if m.get("result"):
         return None  # already played
     if sport == "soccer":
-        mk_, p = max(((k, m["probs"][k]) for k in SAFE_SOCCER_MARKETS), key=lambda kv: kv[1])
-        line = None
+        mks = [x for x in match_markets(m, sport) if x["market"] in SAFE_SOCCER_MARKETS]
     else:
-        best = max(m["markets"], key=lambda x: x["prob"])
-        mk_, p, line = best["code"], best["prob"], best.get("line")
-    if p < SAFE_MIN:
+        mks = match_markets(m, sport)
+    if not mks:
         return None
-    t = m["tip"]
-    book = t["book_odds"] if t["market"] == mk_ else None
-    return {"id": m["id"], "league": m["league"], "league_name": m["league_name"], "country": m["country"],
-            "date": m["date"], "time": m["time"], "home": m["home"], "away": m["away"], "sport": sport,
-            "market": mk_, "line": line, "prob": round(p, 4), "odds": book or round(1 / p, 2)}
+    best = max(mks, key=lambda x: x["prob"])
+    return leg(m, sport, best) if best["prob"] >= SAFE_MIN else None
+
+
+def band_pick(m: dict, sport: str, lo: float, hi: float) -> dict | None:
+    """The most likely market of a match whose probability is inside [lo, hi] - a leg with a useful price."""
+    if m.get("result"):
+        return None
+    mks = [x for x in match_markets(m, sport) if lo <= x["prob"] <= hi]
+    return leg(m, sport, max(mks, key=lambda x: x["prob"])) if mks else None
+
+
+def target_coupon(legs: list[dict], target: float, max_legs: int) -> list[dict]:
+    """Choose consecutive legs (sorted by probability) that reach `target` total odds within `max_legs`,
+    keeping the highest overall probability. Empty if impossible."""
+    legs = sorted(legs, key=lambda x: -x["prob"])
+    best, best_p = [], -1.0
+    for i in range(len(legs)):
+        odds, prob, sel = 1.0, 1.0, []
+        for lg in legs[i:i + max_legs]:
+            sel.append(lg)
+            odds *= lg["odds"]
+            prob *= lg["prob"]
+            if odds >= target:
+                if prob > best_p:
+                    best, best_p = list(sel), prob
+                break
+    return best
+
+
+def safe_coupons(todays: list[dict], sport: str, n: int, size: int | None = None) -> list[list[dict]]:
+    """n Safe coupons of `size` legs. Legs are each match's safe markets (>= SAFE_MIN), best first; a match
+    appears once per coupon, and is re-used across coupons (with its next-best market) only when there are
+    too few matches for n distinct coupons."""
+    pool = []
+    for m in todays:
+        if m.get("result"):
+            continue
+        mks = match_markets(m, sport)
+        if sport == "soccer":
+            mks = [x for x in mks if x["market"] in SAFE_SOCCER_MARKETS]
+        for x in sorted(mks, key=lambda x: -x["prob"])[:3]:
+            if x["prob"] >= SAFE_MIN:
+                pool.append(leg(m, sport, x))
+    matches = {p["id"] for p in pool}
+    if size is None:  # quiet day: 2-leg coupons keep "safe" genuinely likely
+        size = 3 if len(matches) >= 6 else 2
+    if len(matches) < size:
+        return []
+    cap = max(1, -(-n * size // len(matches)))  # uses allowed per match
+    uses, used_legs, out = {}, set(), []
+    for _ in range(n):
+        sel = []
+        for lg in sorted(pool, key=lambda x: -x["prob"]):
+            key = (lg["id"], lg["market"], lg["line"])
+            if key in used_legs or uses.get(lg["id"], 0) >= cap or any(s_["id"] == lg["id"] for s_ in sel):
+                continue
+            sel.append(lg)
+            if len(sel) == size:
+                break
+        if len(sel) < size:
+            break
+        for lg in sel:
+            uses[lg["id"]] = uses.get(lg["id"], 0) + 1
+            used_legs.add((lg["id"], lg["market"], lg["line"]))
+        out.append(sel)
+    return out
+
+
+# odds-target coupons: (kind, target total odds, leg probability band, max legs)
+TARGET_COUPONS = [("odds3", 3.0, (0.62, 0.85), 6), ("mega", 10.0, (0.55, 0.82), 10), ("ultra", 30.0, (0.5, 0.78), 14)]
 
 
 def build_coupons(preds: list[dict], today: dt.date, sport: str = "soccer") -> list[dict]:
@@ -518,24 +601,51 @@ def build_coupons(preds: list[dict], today: dt.date, sport: str = "soccer") -> l
 
         # Safe coupons: up to SAFE_COUPONS different 3-leg coupons (no match repeated), each leg on the
         # match's safest market (>= 75%), best legs first.
-        legs = sorted((sp for m in todays if (sp := safe_pick(m, sport))), key=lambda p: -p["prob"])
-        n_safe = min(SAFE_COUPONS, len(legs) // 3)
-        for i in range(n_safe):
-            c = mk("safe" if i == 0 else f"safe{i + 1}", legs[i * 3:(i + 1) * 3])
+        for i, sel in enumerate(safe_coupons(todays, sport, SAFE_COUPONS)):
+            c = mk("safe" if i == 0 else f"safe{i + 1}", sel)
             if c:
                 c["kind"], c["n"] = "safe", i + 1
                 coupons.append(c)
-        value = sorted((m for m in todays if m["tip"]["value"]), key=lambda m: -(m["tip"]["edge"] or 0))[:4]
-        big = sorted((m for m in todays if m["tip"]["prob"] >= 0.55), key=lambda m: -m["tip"]["prob"])[:8]
-        for kind, ms in (("value", value), ("mega", big)):
-            c = mk(kind, [pick(m) for m in ms])
+        value = sorted((m for m in todays if m["tip"]["value"] and not m.get("result")),
+                       key=lambda m: -(m["tip"]["edge"] or 0))[:4]
+        c = mk("value", [pick(m) for m in value])
+        if c:
+            coupons.append(c)
+        # 3-odds, Mega and Ultra: one leg per match at a useful price, best legs first until the target is reached
+        for kind, target, (lo, hi), max_legs in TARGET_COUPONS:
+            legs = [lg for m in todays if (lg := band_pick(m, sport, lo, hi))]
+            c = mk(kind, target_coupon(legs, target, max_legs))
             if c:
+                c["target"] = target
                 coupons.append(c)
     return coupons
 
 
-def tip_won(market: str, hg: int, ag: int, line: float | None = None) -> bool:
+def build_mixed_coupons(preds: list[dict], today: dt.date) -> list[dict]:
+    """Multi-sport 3-odds, Mega and Ultra: one leg per match from every sport, so the odds targets are reachable
+    even on days when a single sport has few games."""
+    out = []
+    for day_offset in range(2):
+        day = (today + dt.timedelta(days=day_offset)).isoformat()
+        todays = [m for m in preds if m["date"] == day and not m.get("result")]
+        for kind, target, (lo, hi), max_legs in TARGET_COUPONS:
+            legs = [lg for m in todays if (lg := band_pick(m, m.get("sport", "soccer"), lo, hi))]
+            sel = target_coupon(legs, target, max_legs)
+            if len(sel) >= 2:
+                out.append({"id": f"{day}|mixed|{kind}", "sport": "mixed", "date": day, "kind": kind, "picks": sel,
+                            "total_odds": round(math.prod(p["odds"] for p in sel), 2),
+                            "prob": round(math.prod(p["prob"] for p in sel), 4), "target": target})
+    return out
+
+
+def tip_won(market: str, hg: int, ag: int, line: float | None = None, ot: int | None = None) -> bool | None:
     t = hg + ag
+    if market in ("R1", "RX", "R2", "DC_1X", "DC_X2", "DC_12"):
+        if ot is None:
+            return None  # cannot grade a 60-minute market without knowing if it went to overtime
+        h_reg, a_reg = (hg > ag and not ot), (ag > hg and not ot)
+        return {"R1": h_reg, "RX": bool(ot), "R2": a_reg, "DC_1X": not a_reg,
+                "DC_X2": not h_reg, "DC_12": not ot}[market]
     if market in ("ML_H", "ML_A", "SP_H", "SP_A", "OV", "UN"):
         return {"ML_H": hg > ag, "ML_A": ag > hg,
                 "SP_H": line is not None and hg + line > ag, "SP_A": line is not None and ag + line > hg,
@@ -571,18 +681,25 @@ def settle_history(history: dict, finished: dict, preds: list[dict], coupons: li
 
     for t in tips.values():
         if t["status"] == "pending" and t["id"] in finished:
-            hg, ag = finished[t["id"]]
-            t["score"] = f"{hg}-{ag}"
-            t["status"] = "won" if tip_won(t["market"], hg, ag, t.get("line")) else "lost"
+            v = finished[t["id"]]
+            hg, ag, ot = v[0], v[1], (v[2] if len(v) > 2 else None)
+            w = tip_won(t["market"], hg, ag, t.get("line"), ot)
+            if w is None:
+                continue
+            t["score"] = f"{hg}-{ag}" + (" (OT)" if ot else "")
+            t["status"] = "won" if w else "lost"
     for c in cps.values():
         if c["status"] != "pending":
             continue
         states = []
         for p in c["picks"]:
             if p["id"] in finished:
-                hg, ag = finished[p["id"]]
-                p["score"] = f"{hg}-{ag}"
-                p["status"] = "won" if tip_won(p["market"], hg, ag, p.get("line")) else "lost"
+                v = finished[p["id"]]
+                hg, ag, ot = v[0], v[1], (v[2] if len(v) > 2 else None)
+                w = tip_won(p["market"], hg, ag, p.get("line"), ot)
+                if w is not None:
+                    p["score"] = f"{hg}-{ag}" + (" (OT)" if ot else "")
+                    p["status"] = "won" if w else "lost"
             states.append(p.get("status", "pending"))
         if "lost" in states:
             c["status"] = "lost"
@@ -731,6 +848,7 @@ def main() -> None:
                        for ms in results.values() for m in ms if m["date"] == d]
             past_preds = predict_fixtures(results, past_fx, d)
             history = settle_history(history, soccer_finished(results), past_preds, build_coupons(past_preds, d))
+    coupons += build_mixed_coupons(preds, today)
     history = settle_history(history, finished, preds, coupons)
     history["demo"] = args.demo
 

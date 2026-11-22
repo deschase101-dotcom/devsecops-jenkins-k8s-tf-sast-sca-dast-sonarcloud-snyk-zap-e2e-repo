@@ -254,3 +254,5 @@ table.std td b { font-family: "JetBrains Mono", monospace; }
 .inj-out, .inj-doubtful { background: rgba(248,113,113,.18); color: var(--lose); }
 .inj-questionable { background: rgba(251,191,36,.18); color: var(--draw); }
 .inj-missed { background: rgba(148,163,184,.18); color: var(--muted); }
+.kind-odds3 { background: rgba(96,165,250,.15); color: var(--blue); }
+.kind-ultra { background: linear-gradient(90deg, rgba(242,121,43,.25), rgba(248,113,113,.25)); color: #ffd2b0; }
