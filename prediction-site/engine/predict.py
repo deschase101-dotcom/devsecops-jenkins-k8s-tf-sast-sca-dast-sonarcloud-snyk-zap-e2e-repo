@@ -810,9 +810,21 @@ def main() -> None:
             if m["date"] == today and match_id(code, m["date"], m["home"], m["away"]) not in known:
                 fixtures.append({**{k: v for k, v in m.items() if k not in ("hg", "ag")}, "result": [m["hg"], m["ag"]]})
     preds = predict_fixtures(results, fixtures, today)
+    euro_fin, euro_names = {}, {}
+    if not args.demo:  # European cups (Champions League) on a cross-league scale
+        try:
+            import europe
+            import fd_results
+            models = {code: LeagueModel(ms, today) for code, ms in results.items() if ms}
+            euro_preds, euro_fin, euro_names = europe.run(results, models, today, markets, choose_tip,
+                                                          fd_results._sim, match_id, FIXTURE_WINDOW_DAYS)
+            preds += euro_preds
+        except Exception as e:  # noqa: BLE001  never let the cups break the leagues
+            print(f"  ! Europe failed: {e}", file=sys.stderr)
     coupons = build_coupons(preds, today, "soccer")
     print(f"  soccer: {len(preds)} predictions, {len(coupons)} coupons")
     finished = soccer_finished(results)
+    finished.update(euro_fin)
     sport_counts = {"soccer": n_res}
     extra_recent, sport_bt = [], {}
     if not args.demo:
@@ -868,7 +880,8 @@ def main() -> None:
     meta = {"generated_at": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
             "date": today.isoformat(), "demo": args.demo, "matches_analysed": sum(sport_counts.values()),
             "sports": sport_counts,
-            "leagues": {c: {"country": LEAGUES[c][0], "name": LEAGUES[c][1]} for c in results if c in LEAGUES},
+            "leagues": {**{c: {"country": LEAGUES[c][0], "name": LEAGUES[c][1]} for c in results if c in LEAGUES},
+                        **{c: {"country": "Europe", "name": n} for c, n in euro_names.items()}},
             "record": summarize_history(history, today)}
 
     def dump(name: str, obj) -> None:
