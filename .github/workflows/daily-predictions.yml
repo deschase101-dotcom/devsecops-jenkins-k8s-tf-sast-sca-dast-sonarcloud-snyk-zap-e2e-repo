@@ -2,8 +2,8 @@ name: Daily predictions
 
 on:
   schedule:
-    # every 2 hours: GitHub often starts scheduled jobs late, so frequent runs keep the site fresh
-    # (new results graded, latest NBA injury report, today's slate) without anyone having to ask
+    # GitHub skips most scheduled runs on small repos, so this is only a backup that restarts the chain;
+    # the "next-run" job below is what really keeps the site updated every ~2 hours
     - cron: "17 */2 * * *"
   workflow_dispatch:
   push:
@@ -16,15 +16,15 @@ permissions:
   contents: write
   pages: write
   id-token: write
-
-concurrency:
-  group: daily-predictions
-  cancel-in-progress: false
+  actions: write
 
 jobs:
   predict:
     runs-on: ubuntu-latest
     timeout-minutes: 120
+    concurrency:
+      group: daily-predictions
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
 
@@ -71,3 +71,22 @@ jobs:
     steps:
       - id: deployment
         uses: actions/deploy-pages@v4
+
+  # Self-scheduling: wait ~2 hours, then start the next run (GITHUB_TOKEN is allowed to dispatch workflows).
+  # Only the newest run keeps the chain going, so a backup cron run never doubles it up.
+  next-run:
+    needs: deploy
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 130
+    steps:
+      - name: Wait, then start the next update
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          sleep 6600
+          newer=$(gh run list --workflow daily-predictions.yml --limit 20 --json number \
+                  --jq "[.[] | select(.number > ${{ github.run_number }})] | length")
+          if [ "$newer" -gt 0 ]; then echo "a newer run exists, it continues the chain"; exit 0; fi
+          gh workflow run daily-predictions.yml --ref main
