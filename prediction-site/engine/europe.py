@@ -64,9 +64,13 @@ def run(results: dict, models: dict, today: dt.date, markets_fn, choose_tip_fn, 
     token = os.environ.get("FOOTBALL_DATA_TOKEN")
     if not token:
         print("  Europe: no FOOTBALL_DATA_TOKEN set, skipping Champions League")
-        return [], {}, {}
+        COMPETITIONS_RUN = {}
+    else:
+        COMPETITIONS_RUN = COMPETITIONS
     preds, finished, names = [], {}, {}
-    for code, comp_name in COMPETITIONS.items():
+    top = max(PRIOR.values())
+    factors = {k: v / top for k, v in PRIOR.items()}
+    for code, comp_name in COMPETITIONS_RUN.items():
         try:
             teams = _get(API.format(c=code, what="teams"), token).get("teams", [])
             matches = _get(API.format(c=code, what="matches"), token).get("matches", [])
@@ -120,6 +124,7 @@ def run(results: dict, models: dict, today: dt.date, markets_fn, choose_tip_fn, 
             f[k] = f.get(k, DEFAULT_FACTOR) * ratio ** (0.5 * w)
         top = max(f[k] for k in f)
         f = {k: v / top for k, v in f.items()}
+        factors = f
 
         # 3) results (for grading) and predictions
         for m in done:
@@ -167,4 +172,111 @@ def run(results: dict, models: dict, today: dt.date, markets_fn, choose_tip_fn, 
         print(f"  Europe {code}: {len(done)} results, {len(preds)} upcoming predicted; league factors "
               + ", ".join(f"{k} {v:.2f}" for k, v in sorted(f.items(), key=lambda kv: -kv[1])
                           if k in {c['country'] for c in club.values()}))
+    try:
+        p2, f2, n2 = run_af_cups(models, today, factors, markets_fn, choose_tip_fn, sim_fn, match_id_fn, horizon_days)
+        preds += p2; finished.update(f2); names.update(n2)
+    except Exception as e:  # noqa: BLE001
+        print(f"  ! Europa/Conference League: {e}", file=sys.stderr)
+    return preds, finished, names
+
+
+# --------------------------------------------------------------------------- Europa / Conference League
+# API-Football (APISPORTS_KEY). Free plan serves only yesterday..tomorrow, so cups appear the day before.
+AF_CUPS = {3: ("EL", "Europa League"), 848: ("ECL", "Conference League")}
+COUNTRY_OF = {v: k for k, v in LEAGUE_OF.items()}
+LIVE = {"1H", "HT", "2H", "ET", "BT", "P", "LIVE", "INT", "SUSP"}
+DONE = {"FT", "AET", "PEN"}
+CACHE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".cache", "af_team_country.json")
+
+
+def run_af_cups(models, today, f, markets_fn, choose_tip_fn, sim_fn, match_id_fn, horizon_days):
+    import fd_results as fr
+    if not os.environ.get("APISPORTS_KEY"):
+        return [], {}, {}
+    utc = dt.datetime.now(dt.timezone.utc).date()
+    games = []
+    for d in (utc - dt.timedelta(days=1), utc, utc + dt.timedelta(days=1)):
+        for x in fr.af_day(d) or []:
+            if (x.get("league") or {}).get("id") in AF_CUPS:
+                games.append(x)
+    if not games:
+        print("  Europa/Conference League: no games yesterday..tomorrow")
+        return [], {}, {}
+    try:
+        countries = json.load(open(CACHE))
+    except Exception:  # noqa: BLE001
+        countries = {}
+    pool = [(lg, t) for lg, m in models.items() if lg in COUNTRY_OF for t in m.teams]
+    looked = 0
+
+    def club(team: dict) -> tuple[str, str | None, str | None]:
+        """(country, our league, our team) for an API team."""
+        nonlocal looked
+        name = team.get("name") or ""
+        best = max(pool, key=lambda lt: sim_fn(lt[1], name), default=None)
+        if best and sim_fn(best[1], name) >= 0.8:
+            return COUNTRY_OF[best[0]], best[0], best[1]
+        tid = str(team.get("id"))
+        if tid not in countries and looked < 15 and (fr.AF_QUOTA["remaining"] is None or fr.AF_QUOTA["remaining"] > 30):
+            looked += 1
+            data = fr.af_get(f"https://v3.football.api-sports.io/teams?id={tid}")
+            resp = (data or {}).get("response") or []
+            if resp:
+                countries[tid] = (resp[0].get("team") or {}).get("country") or ""
+        return countries.get(tid, ""), None, None
+
+    def rating(c):
+        country, lg, t = c
+        fac = f.get(country, DEFAULT_FACTOR)
+        if t:
+            m = models[lg]
+            return m.base * m.att[t] * fac, m.dfn[t] / fac, True
+        return 1.30 * fac, 1.0 / fac, False
+
+    preds, finished, names = [], {}, {}
+    for x in games:
+        code, comp_name = AF_CUPS[x["league"]["id"]]
+        names[code] = comp_name
+        fx, g = x.get("fixture") or {}, x.get("goals") or {}
+        st = (fx.get("status") or {}).get("short", "")
+        d = dt.date.fromisoformat(fx["date"][:10])
+        th, ta = x["teams"]["home"], x["teams"]["away"]
+        h, a = th.get("name"), ta.get("name")
+        mid = match_id_fn(code, d, h, a)
+        result = [int(g["home"]), int(g["away"])] if st in DONE and g.get("home") is not None else None
+        if result:
+            finished[mid] = tuple(result)
+        if not (today <= d <= today + dt.timedelta(days=horizon_days)):
+            continue
+        if st not in DONE and st not in LIVE and st not in ("NS", "TBD"):
+            continue  # postponed / cancelled
+        ch, ca = club(th), club(ta)
+        ah, dh, kh = rating(ch)
+        aa, da, ka = rating(ca)
+        lh, la = ah * da * HOME_ADV, aa * dh / HOME_ADV
+        M = _matrix(lh, la)
+        p = markets_fn(M)
+        scores = sorted(((M[i][j], f"{i}-{j}") for i in range(6) for j in range(6)), reverse=True)[:5]
+        tip = choose_tip_fn(p, {})
+        if not (kh and ka):
+            tip["confidence"] = "low"
+        preds.append({
+            "id": mid, "sport": "soccer", "league": code, "result": result, "live": st in LIVE,
+            "country": "Europe", "league_name": comp_name, "date": d.isoformat(), "time": fx["date"][11:16],
+            "home": h, "away": a, "xg": [round(lh, 2), round(la, 2)], "probs": p,
+            "correct_scores": [{"score": s, "prob": round(pr, 4)} for pr, s in scores], "odds": {}, "tip": tip,
+            "form": {"home": [], "away": []}, "stats": {"home": {}, "away": {}}, "h2h": [],
+            "strength": {"home_att": round(ah, 2), "home_def": round(dh, 2), "away_att": round(aa, 2),
+                         "away_def": round(da, 2)},
+            "europe": {"home_league": ch[0], "away_league": ca[0],
+                       "home_factor": round(f.get(ch[0], DEFAULT_FACTOR), 3),
+                       "away_factor": round(f.get(ca[0], DEFAULT_FACTOR), 3), "rated_home": kh, "rated_away": ka},
+        })
+    try:
+        os.makedirs(os.path.dirname(CACHE), exist_ok=True)
+        json.dump(countries, open(CACHE, "w"))
+    except Exception:  # noqa: BLE001
+        pass
+    print(f"  Europa/Conference League: {len(preds)} games predicted, {len(finished)} results, "
+          f"{looked} team lookups, API quota left {fr.AF_QUOTA['remaining']}")
     return preds, finished, names

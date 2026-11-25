@@ -178,6 +178,40 @@ AF_MAP = {("England", "Premier League"): "E0", ("England", "Championship"): "E1"
 FINAL = {"FT", "AET", "PEN"}
 
 
+_AF_DAYS: dict[str, list | None] = {}
+AF_QUOTA = {"remaining": None}
+
+
+def af_get(url: str) -> dict | None:
+    """One API-Football request (records the daily quota left)."""
+    key = (os.environ.get("APISPORTS_KEY") or "").strip()  # pasted secrets often carry a stray space/newline
+    if not key:
+        return None
+    try:
+        req = urllib.request.Request(url, headers={"x-apisports-key": key})
+        with urllib.request.urlopen(req, timeout=30) as r:
+            rem = r.headers.get("x-ratelimit-requests-remaining")
+            if rem is not None and rem.isdigit():
+                AF_QUOTA["remaining"] = int(rem)
+            data = json.loads(r.read().decode("utf-8"))
+    except Exception as e:  # noqa: BLE001
+        print(f"  ! API-Football: {e}", file=sys.stderr)
+        return None
+    if data.get("errors"):
+        print(f"  ! API-Football: {data['errors']}", file=sys.stderr)
+        return None
+    return data
+
+
+def af_day(d: dt.date) -> list | None:
+    """All fixtures of one UTC day (fetched once per run, shared by results and the European cups)."""
+    k = d.isoformat()
+    if k not in _AF_DAYS:
+        data = af_get(AF_API.format(d=k))
+        _AF_DAYS[k] = None if data is None else data.get("response", [])
+    return _AF_DAYS[k]
+
+
 def fetch_api_football(today: dt.date, days: int = 2) -> list[dict]:  # noqa: ARG001
     """Same-night results for every league we cover (1 request per day; free plan = 100 requests/day)."""
     key = os.environ.get("APISPORTS_KEY")
@@ -189,17 +223,10 @@ def fetch_api_football(today: dt.date, days: int = 2) -> list[dict]:  # noqa: AR
     utc_today = dt.datetime.now(dt.timezone.utc).date()
     for i in range(days):
         d = utc_today - dt.timedelta(days=i)
-        try:
-            req = urllib.request.Request(AF_API.format(d=d.isoformat()), headers={"x-apisports-key": key})
-            with urllib.request.urlopen(req, timeout=30) as r:
-                data = json.loads(r.read().decode("utf-8"))
-        except Exception as e:  # noqa: BLE001
-            print(f"  ! API-Football {d}: {e}", file=sys.stderr)
+        day = af_day(d)
+        if day is None:
             continue
-        if data.get("errors"):
-            print(f"  ! API-Football {d}: {data['errors']}", file=sys.stderr)
-            continue
-        for f in data.get("response", []):
+        for f in day:
             lg = f.get("league") or {}
             code = AF_MAP.get((lg.get("country"), lg.get("name")))
             g = f.get("goals") or {}
