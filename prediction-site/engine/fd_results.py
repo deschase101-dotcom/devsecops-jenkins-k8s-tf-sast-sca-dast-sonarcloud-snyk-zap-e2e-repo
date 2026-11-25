@@ -112,6 +112,57 @@ def merge(results: dict[str, list[dict]], fixtures: list[dict], fd: list[dict]) 
     return added
 
 
+UPCOMING_API = "https://api.football-data.org/v4/matches?dateFrom={a}&dateTo={b}"
+
+
+def fetch_upcoming(today: dt.date, days: int = 7) -> list[dict]:
+    """Scheduled league matches for the next days (football-data.co.uk posts weekend fixtures late in the week)."""
+    token = os.environ.get("FOOTBALL_DATA_TOKEN")
+    if not token:
+        return []
+    url = UPCOMING_API.format(a=today.isoformat(), b=(today + dt.timedelta(days=min(days, 9))).isoformat())
+    try:
+        req = urllib.request.Request(url, headers={"X-Auth-Token": token, "User-Agent": "ProScore/1.0"})
+        with urllib.request.urlopen(req, timeout=30) as r:
+            data = json.loads(r.read().decode("utf-8"))
+    except Exception as e:  # noqa: BLE001
+        print(f"  ! football-data.org fixtures: {e}", file=sys.stderr)
+        return []
+    out = []
+    for m in data.get("matches", []):
+        code = CODE_MAP.get((m.get("competition") or {}).get("code"))
+        if not code or m.get("status") not in ("SCHEDULED", "TIMED"):
+            continue
+        h, a = m["homeTeam"], m["awayTeam"]
+        out.append({"league": code, "utc": m["utcDate"],
+                    "home_names": [h.get("shortName") or "", h.get("name") or "", h.get("tla") or ""],
+                    "away_names": [a.get("shortName") or "", a.get("name") or "", a.get("tla") or ""]})
+    return out
+
+
+def add_fixtures(results: dict[str, list[dict]], fixtures: list[dict], upcoming: list[dict]) -> int:
+    """Add scheduled matches that our fixture list doesn't have yet, using our own team names."""
+    added = 0
+    for x in upcoming:
+        code = x["league"]
+        teams = sorted({m["home"] for m in results.get(code, [])} | {m["away"] for m in results.get(code, [])})
+        if not teams:
+            continue
+        th = max(teams, key=lambda t: max(_sim(t, n) for n in x["home_names"] if n))
+        ta = max(teams, key=lambda t: max(_sim(t, n) for n in x["away_names"] if n))
+        s = min(max(_sim(th, n) for n in x["home_names"] if n), max(_sim(ta, n) for n in x["away_names"] if n))
+        if s < 0.6 or th == ta:
+            continue
+        day = dt.date.fromisoformat(x["utc"][:10])
+        if any(f["league"] == code and f["home"] == th and f["away"] == ta and abs((f["date"] - day).days) <= 1
+               for f in fixtures):
+            continue
+        fixtures.append({"league": code, "date": day, "time": x["utc"][11:16], "home": th, "away": ta,
+                         "odds": {}, "source": "football-data.org"})
+        added += 1
+    return added
+
+
 # --------------------------------------------------------------------------- API-Football (api-sports.io)
 AF_API = "https://v3.football.api-sports.io/fixtures?date={d}"
 AF_MAP = {("England", "Premier League"): "E0", ("England", "Championship"): "E1", ("Spain", "La Liga"): "SP1",
