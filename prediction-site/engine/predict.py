@@ -667,7 +667,11 @@ def soccer_finished(results: dict[str, list[dict]]) -> dict:
 def settle_history(history: dict, finished: dict, preds: list[dict], coupons: list[dict]) -> dict:
     """history = {"tips": {id: {...}}, "coupons": {id: {...}}} — append new, settle finished."""
     tips, cps = history.setdefault("tips", {}), history.setdefault("coupons", {})
+    # once a match has kicked off its tip is locked: it must stay what was published before the start
+    started = {m["id"] for m in preds if m.get("result") is not None or m.get("live")}
     for m in preds:
+        if m["id"] in tips and m["id"] in started:
+            continue
         if m["id"] not in tips or tips[m["id"]]["status"] == "pending":
             t = m["tip"]
             tips[m["id"]] = {"id": m["id"], "sport": m.get("sport", "soccer"), "line": t.get("line"),
@@ -676,6 +680,10 @@ def settle_history(history: dict, finished: dict, preds: list[dict], coupons: li
                              "market": t["market"], "prob": t["prob"], "odds": t["book_odds"] or t["fair_odds"],
                              "status": "pending", "score": None}
     for c in coupons:
+        old = cps.get(c["id"])
+        if old and any(p["id"] in started or tips.get(p["id"], {}).get("status", "pending") != "pending"
+                       for p in old["picks"]):
+            continue  # a leg has started: keep the coupon as published
         if c["id"] not in cps or cps[c["id"]]["status"] == "pending":
             cps[c["id"]] = {**c, "status": "pending"}
 
@@ -862,6 +870,15 @@ def main() -> None:
             history = settle_history(history, soccer_finished(results), past_preds, build_coupons(past_preds, d))
     coupons += build_mixed_coupons(preds, today)
     history = settle_history(history, finished, preds, coupons)
+    # cards of started matches show the locked tip
+    for m in preds:
+        h = history["tips"].get(m["id"])
+        if h and (m.get("result") is not None or m.get("live")) and (h["market"], h.get("line")) != (
+                m["tip"]["market"], m["tip"].get("line")):
+            m["tip"] = {**m["tip"], "market": h["market"], "line": h.get("line"), "prob": h["prob"]}
+    # show locked coupons exactly as published (and graded), not re-built after kick-off
+    coupons = [{**history["coupons"][c["id"]]} if c["id"] in history["coupons"]
+               and history["coupons"][c["id"]]["picks"] != c["picks"] else c for c in coupons]
     history["demo"] = args.demo
 
     season_start = dt.date(today.year if today.month >= 7 else today.year - 1, 7, 1)

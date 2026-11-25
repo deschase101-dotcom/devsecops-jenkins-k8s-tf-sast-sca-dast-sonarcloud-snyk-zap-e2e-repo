@@ -127,10 +127,17 @@ def run(results: dict, models: dict, today: dt.date, markets_fn, choose_tip_fn, 
             h, a = club[m["homeTeam"]["id"]]["name"], club[m["awayTeam"]["id"]]["name"]
             finished[match_id_fn(code, d, h, a)] = (m["score"]["fullTime"]["home"], m["score"]["fullTime"]["away"])
         for m in matches:
-            if m.get("status") not in ("TIMED", "SCHEDULED"):
+            st = m.get("status")
+            if st not in ("TIMED", "SCHEDULED", "IN_PLAY", "PAUSED", "FINISHED"):
                 continue
             d = dt.date.fromisoformat(m["utcDate"][:10])
             if not (today <= d <= today + dt.timedelta(days=horizon_days)):
+                continue
+            # today's games stay listed while live and after the final whistle (their tip is locked in history)
+            ft = (m.get("score") or {}).get("fullTime") or {}
+            result = [ft["home"], ft["away"]] if st == "FINISHED" and ft.get("home") is not None else None
+            live = st in ("IN_PLAY", "PAUSED")
+            if st == "FINISHED" and result is None:
                 continue
             hid, aid = m["homeTeam"]["id"], m["awayTeam"]["id"]
             ah, dh, kh = rating(hid, f)
@@ -144,7 +151,7 @@ def run(results: dict, models: dict, today: dt.date, markets_fn, choose_tip_fn, 
             if not (kh and ka):
                 tip["confidence"] = "low"
             preds.append({
-                "id": match_id_fn(code, d, h, a), "sport": "soccer", "league": code, "result": None,
+                "id": match_id_fn(code, d, h, a), "sport": "soccer", "league": code, "result": result, "live": live,
                 "country": "Europe", "league_name": comp_name, "date": d.isoformat(),
                 "time": m["utcDate"][11:16], "home": h, "away": a,
                 "xg": [round(lh, 2), round(la, 2)], "probs": p,
