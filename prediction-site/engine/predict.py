@@ -805,6 +805,8 @@ def main() -> None:
         print(f"  API-Football: {n_af} recent results added")
         n_fd = fd_results.merge(results, fixtures, fd_results.fetch(today))  # backup source
         print(f"  football-data.org: {n_fd} recent results added")
+        n_fx = fd_results.add_fixtures(results, fixtures, fd_results.fetch_upcoming(today, FIXTURE_WINDOW_DAYS))
+        print(f"  football-data.org: {n_fx} upcoming league matches added")
     # attach final scores to fixtures that have been played (fixtures.csv can still list them)
     finals = {match_id(c, m["date"], m["home"], m["away"]): (m["hg"], m["ag"]) for c, ms in results.items() for m in ms}
     for f in fixtures:
