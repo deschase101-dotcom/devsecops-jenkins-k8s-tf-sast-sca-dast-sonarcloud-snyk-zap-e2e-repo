@@ -179,14 +179,20 @@ FINAL = {"FT", "AET", "PEN"}
 
 
 _AF_DAYS: dict[str, list | None] = {}
-AF_QUOTA = {"remaining": None}
+AF_QUOTA = {"remaining": None, "last": 0.0, "blocked": False}
+AF_GAP = 6.5  # free plan: 10 requests per minute
 
 
 def af_get(url: str) -> dict | None:
     """One API-Football request (records the daily quota left)."""
     key = (os.environ.get("APISPORTS_KEY") or "").strip()  # pasted secrets often carry a stray space/newline
-    if not key:
+    if not key or AF_QUOTA["blocked"]:
         return None
+    import time
+    wait = AF_QUOTA["last"] + AF_GAP - time.time()
+    if wait > 0:
+        time.sleep(wait)
+    AF_QUOTA["last"] = time.time()
     try:
         req = urllib.request.Request(url, headers={"x-apisports-key": key})
         with urllib.request.urlopen(req, timeout=30) as r:
@@ -196,6 +202,8 @@ def af_get(url: str) -> dict | None:
             data = json.loads(r.read().decode("utf-8"))
     except Exception as e:  # noqa: BLE001
         print(f"  ! API-Football: {e}", file=sys.stderr)
+        if "429" in str(e):
+            AF_QUOTA["blocked"] = True  # over the limit: stop for this run, the next run carries on
         return None
     if data.get("errors"):
         print(f"  ! API-Football: {data['errors']}", file=sys.stderr)
