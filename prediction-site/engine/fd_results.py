@@ -42,7 +42,7 @@ ALIASES = {"ath bilbao": "athletic", "athletic club": "athletic", "ath madrid": 
            "sheffield weds": "sheffield wednesday", "qpr": "queens park rangers", "wolves": "wolverhampton",
            "paris sg": "paris saint germain", "psg": "paris saint germain", "inter": "inter milan", "milan": "ac milan",
            "dortmund": "borussia dortmund", "m gladbach": "borussia monchengladbach", "ein frankfurt": "eintracht frankfurt",
-           "leverkusen": "bayer leverkusen", "sp lisbon": "sporting cp", "sporting": "sporting cp"}
+           "leverkusen": "bayer leverkusen", "heart of midlothian": "hearts", "hearts": "hearts", "sp lisbon": "sporting cp", "sporting": "sporting cp"}
 
 
 def _sim(a: str, b: str) -> float:
