@@ -33,6 +33,12 @@ PRIOR = {"England": 1.00, "Spain": 0.97, "Italy": 0.94, "Germany": 0.94, "France
          "Czech Republic": 0.78, "Norway": 0.76, "Denmark": 0.76, "Switzerland": 0.75, "Greece": 0.76,
          "Ukraine": 0.74, "Croatia": 0.72, "Serbia": 0.72, "Poland": 0.73, "Israel": 0.70, "Cyprus": 0.70,
          "Slovakia": 0.70, "Azerbaijan": 0.68, "Hungary": 0.70, "Sweden": 0.72, "Romania": 0.70}
+# smaller associations (Europa / Conference League)
+PRIOR.update({"Bulgaria": 0.68, "Kazakhstan": 0.64, "Armenia": 0.60, "Albania": 0.60, "Gibraltar": 0.50,
+              "Andorra": 0.50, "Lithuania": 0.60, "Latvia": 0.60, "Finland": 0.65, "Bosnia and Herzegovina": 0.63,
+              "Georgia": 0.62, "Slovenia": 0.66, "Iceland": 0.60, "Ireland": 0.62, "Moldova": 0.58, "Kosovo": 0.58,
+              "Malta": 0.50, "Wales": 0.52, "Northern Ireland": 0.55, "Luxembourg": 0.55, "Faroe Islands": 0.50,
+              "Montenegro": 0.58, "North Macedonia": 0.57, "Belarus": 0.62, "Estonia": 0.55, "San Marino": 0.45})
 DEFAULT_FACTOR = 0.68
 HOME_ADV = 1.18     # smaller than in domestic leagues
 RHO = -0.08
@@ -217,13 +223,13 @@ def run_af_cups(models, today, f, markets_fn, choose_tip_fn, sim_fn, match_id_fn
         if best and sim_fn(best[1], name) >= 0.8:
             return COUNTRY_OF[best[0]], best[0], best[1]
         tid = str(team.get("id"))
-        if tid not in countries and looked < 15 and (fr.AF_QUOTA["remaining"] is None or fr.AF_QUOTA["remaining"] > 30):
+        if tid not in countries and looked < 40 and (fr.AF_QUOTA["remaining"] is None or fr.AF_QUOTA["remaining"] > 45):
             looked += 1
             data = fr.af_get(f"https://v3.football.api-sports.io/teams?id={tid}")
             resp = (data or {}).get("response") or []
             if resp:
                 countries[tid] = (resp[0].get("team") or {}).get("country") or ""
-        return countries.get(tid, ""), None, None
+        return countries.get(tid, "").replace("-", " "), None, None  # API writes "Czech-Republic"
 
     def rating(c):
         country, lg, t = c
@@ -261,6 +267,8 @@ def run_af_cups(models, today, f, markets_fn, choose_tip_fn, sim_fn, match_id_fn
         if not (kh and ka):
             tip["confidence"] = "low"
         preds.append({
+            # coupons only use cup games where at least one club is rated and both countries are known
+            "coupon_ok": bool((kh or ka) and ch[0] and ca[0]),
             "id": mid, "sport": "soccer", "league": code, "result": result, "live": st in LIVE,
             "country": "Europe", "league_name": comp_name, "date": d.isoformat(), "time": fx["date"][11:16],
             "home": h, "away": a, "xg": [round(lh, 2), round(la, 2)], "probs": p,

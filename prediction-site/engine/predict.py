@@ -580,7 +580,7 @@ def build_coupons(preds: list[dict], today: dt.date, sport: str = "soccer") -> l
     coupons = []
     for day_offset in range(2):
         day = (today + dt.timedelta(days=day_offset)).isoformat()
-        todays = [m for m in preds if m["date"] == day]
+        todays = [m for m in preds if m["date"] == day and m.get("coupon_ok", True)]
         if not todays:
             continue
 
@@ -627,7 +627,7 @@ def build_mixed_coupons(preds: list[dict], today: dt.date) -> list[dict]:
     out = []
     for day_offset in range(2):
         day = (today + dt.timedelta(days=day_offset)).isoformat()
-        todays = [m for m in preds if m["date"] == day and not m.get("result")]
+        todays = [m for m in preds if m["date"] == day and not m.get("result") and m.get("coupon_ok", True)]
         for kind, target, (lo, hi), max_legs in TARGET_COUPONS:
             legs = [lg for m in todays if (lg := band_pick(m, m.get("sport", "soccer"), lo, hi))]
             sel = target_coupon(legs, target, max_legs)
