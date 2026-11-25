@@ -49,8 +49,10 @@ def _sim(a: str, b: str) -> float:
     na, nb = _norm(a), _norm(b)
     if not na or not nb:
         return 0.0
-    if na in nb or nb in na:
-        return 0.95
+    if na == nb:
+        return 1.0  # exact beats partial: "Real Madrid" (-> "madrid") must not lose a tie to "Ath Madrid"
+    if na in nb or nb in na:  # partial: the more of the longer name it covers, the better
+        return 0.8 + 0.15 * min(len(na), len(nb)) / max(len(na), len(nb))
     return difflib.SequenceMatcher(None, na, nb).ratio()
 
 
@@ -156,6 +158,10 @@ def add_fixtures(results: dict[str, list[dict]], fixtures: list[dict], upcoming:
         day = dt.date.fromisoformat(x["utc"][:10])
         if any(f["league"] == code and f["home"] == th and f["away"] == ta and abs((f["date"] - day).days) <= 1
                for f in fixtures):
+            continue
+        if any(f["league"] == code and {th, ta} & {f["home"], f["away"]} and abs((f["date"] - day).days) <= 1
+               for f in fixtures):
+            print(f"  ! fixture skipped (team already plays then, name match unsure): {th} v {ta} {day}")
             continue
         fixtures.append({"league": code, "date": day, "time": x["utc"][11:16], "home": th, "away": ta,
                          "odds": {}, "source": "football-data.org"})
